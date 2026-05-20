@@ -1,0 +1,153 @@
+import type {
+  BrokerStatus,
+  HorizonFilter,
+  MarketFilter,
+  Signal,
+} from "./types";
+
+export const brokerStatuses: BrokerStatus[] = [
+  {
+    name: "Zerodha",
+    status: "India research context",
+    detail: "Use for Indian stock portfolio context and later Kite Connect data.",
+  },
+  {
+    name: "INDmoney",
+    status: "US research context",
+    detail: "Use for US stock watchlists and manual execution until API access is confirmed.",
+  },
+];
+
+export const signals: Signal[] = [
+  {
+    symbol: "RELIANCE",
+    market: "India",
+    horizon: "Intraday",
+    confidence: "74%",
+    recommendation: "Intraday pick",
+    broker: "Zerodha",
+    trigger: "Watch above 2940 with volume confirmation",
+    invalidation: "Avoid below 2892 or if market breadth weakens",
+    reviewPlan: "Same-day review near 3010 or before close",
+    reason:
+      "Volume expansion with positive sector momentum. Valid only above opening range.",
+    newsCatalyst: "Energy-sector momentum and index participation.",
+    technicalView: "Opening-range breakout candidate.",
+    volumeView: "Needs above-average volume to confirm the move.",
+    fundamentalView: "Large-cap quality, but intraday view is catalyst-led.",
+    riskView: "Medium risk because invalidation is tight and time-bound.",
+    fnoView: "F&O possible through Zerodha/NFO, but use only defined-risk ideas.",
+    scores: {
+      news: 74,
+      technical: 76,
+      volume: 78,
+      fundamentals: 66,
+      risk: 62,
+    },
+    marketSnapshot: {
+      price: "2940.00",
+      changePercent: "+1.2%",
+      volume: "Above average",
+      trend: "Strong",
+    },
+  },
+  {
+    symbol: "HDFCBANK",
+    market: "India",
+    horizon: "Hold",
+    confidence: "68%",
+    recommendation: "Hold pick",
+    broker: "Zerodha",
+    trigger: "Stagger entries near support instead of chasing",
+    invalidation: "Review if it closes below 1475 with weak sector breadth",
+    reviewPlan: "Review around earnings or near +12%",
+    reason:
+      "Large-cap banking exposure with improving relative strength and lower chase risk.",
+    newsCatalyst: "Banking-sector sentiment and earnings expectations.",
+    technicalView: "Improving relative strength versus broad market.",
+    volumeView: "Prefer accumulation only when delivery/volume supports price.",
+    fundamentalView: "Better suited for longer hold than fast intraday trade.",
+    riskView: "Lower risk than momentum names, but slow-moving.",
+    fnoView: "F&O available, but stock holding is cleaner than option buying here.",
+    scores: {
+      news: 60,
+      technical: 67,
+      volume: 62,
+      fundamentals: 74,
+      risk: 70,
+    },
+    marketSnapshot: {
+      price: "1515.00",
+      changePercent: "+0.4%",
+      volume: "Normal",
+      trend: "Neutral",
+    },
+  },
+  {
+    symbol: "NVDA",
+    market: "US",
+    horizon: "Hold",
+    confidence: "71%",
+    recommendation: "Hold pick",
+    broker: "INDmoney",
+    trigger: "Watch for pullback or breakout retest",
+    invalidation: "Review if it closes below 50-DMA with weak AI names",
+    reviewPlan: "Quarterly review around earnings and guidance",
+    reason:
+      "AI infrastructure momentum remains strong, but valuation risk needs staged entry.",
+    newsCatalyst: "AI infrastructure demand and chip-sector leadership.",
+    technicalView: "Strong trend, but avoid emotional chase entries.",
+    volumeView: "Healthy institutional volume matters before adding.",
+    fundamentalView: "High-quality growth, but valuation needs discipline.",
+    riskView: "Medium-high risk because expectations are already elevated.",
+    fnoView: "US F&O not integrated through INDmoney in this app.",
+    scores: {
+      news: 82,
+      technical: 73,
+      volume: 70,
+      fundamentals: 76,
+      risk: 56,
+    },
+    marketSnapshot: {
+      price: "Watch live quote",
+      changePercent: "Pending",
+      volume: "Pending",
+      trend: "Strong",
+    },
+  },
+  {
+    symbol: "AAPL",
+    market: "US",
+    horizon: "Intraday",
+    confidence: "62%",
+    recommendation: "Watch",
+    broker: "INDmoney",
+    trigger: "Only watch above day high with broad Nasdaq support",
+    invalidation: "Avoid below VWAP",
+    reviewPlan: "Intraday only; no forced overnight hold",
+    reason:
+      "Short-term momentum candidate for INDmoney watchlist, but needs price confirmation.",
+    newsCatalyst: "Consumer-tech sentiment, product-cycle headlines, and Nasdaq trend.",
+    technicalView: "Breakout watch, not a confirmed pick yet.",
+    volumeView: "Needs relative volume before acting.",
+    fundamentalView: "Strong business, but this setup is short-term.",
+    riskView: "Medium risk because the catalyst is weaker than the trend.",
+    fnoView: "US F&O not integrated through INDmoney in this app.",
+    scores: {
+      news: 55,
+      technical: 64,
+      volume: 58,
+      fundamentals: 78,
+      risk: 58,
+    },
+    marketSnapshot: {
+      price: "Watch live quote",
+      changePercent: "Pending",
+      volume: "Pending",
+      trend: "Neutral",
+    },
+  },
+];
+
+export const marketFilters: MarketFilter[] = ["All", "India", "US"];
+export const horizonFilters: HorizonFilter[] = ["All", "Intraday", "Hold"];
