@@ -11,13 +11,33 @@ export type ServerConfig = {
   KITE_API_SECRET?: string;
 };
 
+export type ServerConfigDiagnostic = {
+  errorCode?: string;
+  loaded: boolean;
+  region: string;
+  secretName: string;
+  source: "environment" | "secrets-manager" | "unavailable";
+};
+
 const productionSecretName = "stock-analyzer/production";
 let productionConfigPromise: Promise<ServerConfig> | null = null;
+let diagnostic: ServerConfigDiagnostic = {
+  loaded: false,
+  region: getAwsRegion(),
+  secretName: productionSecretName,
+  source: "unavailable",
+};
 
 export async function getServerConfig(): Promise<ServerConfig> {
   const localConfig = getEnvironmentConfig();
 
-  if (!isAwsRuntime()) {
+  if (hasCompleteConfig(localConfig)) {
+    diagnostic = {
+      loaded: true,
+      region: getAwsRegion(),
+      secretName: productionSecretName,
+      source: "environment",
+    };
     return localConfig;
   }
 
@@ -34,18 +54,51 @@ export async function getServerConfig(): Promise<ServerConfig> {
   };
 }
 
+export async function getServerConfigDiagnostic() {
+  await getServerConfig();
+  return diagnostic;
+}
+
 async function loadProductionSecret(): Promise<ServerConfig> {
   try {
-    const client = new SecretsManagerClient({});
+    const region = getAwsRegion();
+    const client = new SecretsManagerClient(
+      region === "AWS runtime default" ? {} : { region },
+    );
     const response = await client.send(
       new GetSecretValueCommand({ SecretId: productionSecretName }),
     );
 
-    if (!response.SecretString) return {};
+    if (!response.SecretString) {
+      diagnostic = {
+        errorCode: "SecretStringMissing",
+        loaded: false,
+        region,
+        secretName: productionSecretName,
+        source: "unavailable",
+      };
+      return {};
+    }
 
-    return sanitizeConfig(JSON.parse(response.SecretString) as unknown);
+    const config = sanitizeConfig(JSON.parse(response.SecretString) as unknown);
+    diagnostic = {
+      errorCode: hasCompleteConfig(config) ? undefined : "RequiredKeysMissing",
+      loaded: hasCompleteConfig(config),
+      region,
+      secretName: productionSecretName,
+      source: hasCompleteConfig(config) ? "secrets-manager" : "unavailable",
+    };
+
+    return config;
   } catch (error) {
     console.error("Unable to load Stock Analyzer production secret:", error);
+    diagnostic = {
+      errorCode: getErrorCode(error),
+      loaded: false,
+      region: getAwsRegion(),
+      secretName: productionSecretName,
+      source: "unavailable",
+    };
     return {};
   }
 }
@@ -74,10 +127,25 @@ function getString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function isAwsRuntime() {
+function hasCompleteConfig(config: ServerConfig) {
   return Boolean(
-    process.env.AWS_REGION ||
-      process.env.AWS_DEFAULT_REGION ||
-      process.env.AWS_EXECUTION_ENV,
+    config.FINNHUB_API_KEY &&
+      config.KITE_API_KEY &&
+      config.KITE_API_SECRET,
   );
+}
+
+function getAwsRegion() {
+  return (
+    process.env.AWS_REGION ||
+    process.env.AWS_DEFAULT_REGION ||
+    "AWS runtime default"
+  );
+}
+
+function getErrorCode(error: unknown) {
+  if (!error || typeof error !== "object") return "UnknownError";
+
+  const value = error as { name?: unknown };
+  return typeof value.name === "string" ? value.name : "UnknownError";
 }

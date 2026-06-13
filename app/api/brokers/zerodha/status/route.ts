@@ -6,10 +6,12 @@ import {
   getZerodhaStatus,
   kiteCookieName,
 } from "../../../../lib/zerodha";
+import { getServerConfigDiagnostic } from "../../../../lib/serverConfig";
 
 export async function GET() {
   const cookieStore = await cookies();
   const zerodhaStatus = await getZerodhaStatus();
+  const configDiagnostic = await getServerConfigDiagnostic();
   const cookieToken = cookieStore.get(kiteCookieName)?.value;
   const accessToken = getZerodhaAccessToken(cookieToken);
   const profileResult = accessToken
@@ -25,6 +27,7 @@ export async function GET() {
       profileResult?.message ??
       "Connect Zerodha to enable live Indian market data.",
     ...zerodhaStatus,
+    configDiagnostic,
   });
 
   if (profileResult?.reconnectRequired) {
