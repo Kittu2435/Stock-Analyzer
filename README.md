@@ -48,8 +48,8 @@ server-rendered Next.js applications through Next.js 15.
    `Kittu2435/Stock-Analyzer`, and select the `develop` branch.
 3. Keep the detected SSR build settings. The committed `amplify.yml` runs
    `npm ci` and the production build without copying secrets into build files.
-4. In AWS Secrets Manager, create a secret named
-   `stock-analyzer/production` using the JSON key/value secret type:
+4. In AWS Secrets Manager, create a secret named `API_Keys` using the JSON
+   key/value secret type:
 
 ```json
 {

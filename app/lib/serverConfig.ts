@@ -19,7 +19,7 @@ export type ServerConfigDiagnostic = {
   source: "environment" | "secrets-manager" | "unavailable";
 };
 
-const productionSecretName = "stock-analyzer/production";
+const productionSecretName = "API_Keys";
 let productionConfigPromise: Promise<ServerConfig> | null = null;
 let diagnostic: ServerConfigDiagnostic = {
   loaded: false,
