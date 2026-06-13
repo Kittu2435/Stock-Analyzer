@@ -526,6 +526,21 @@ function AgentPickCard({
         ) : null}
       </dl>
 
+      <dl className="mt-3 grid gap-3 md:grid-cols-3">
+        <Info
+          label="News evidence quality"
+          value={pick.sentiment.evidenceQuality}
+        />
+        <Info
+          label="Article analysis"
+          value={`${pick.sentiment.fullTextArticles} full text / ${pick.sentiment.summaryArticles} summaries / ${pick.sentiment.headlineOnlyArticles} headline only`}
+        />
+        <Info
+          label="Explicit financial evidence"
+          value={`${pick.sentiment.explicitEvidenceArticles} report${pick.sentiment.explicitEvidenceArticles === 1 ? "" : "s"}`}
+        />
+      </dl>
+
       {pick.strategy.type === "No Trade" &&
       pick.signal.exchange !== "US" ? (
         <section className="mt-3 border-t border-slate-200 pt-4">
@@ -571,6 +586,17 @@ function AgentPickCard({
               {headline.source} | {formatHeadlineTimestamp(headline.publishedAt)}
             </span>
             <span className="mt-1 block text-sm font-medium">{headline.title}</span>
+            <span className="mt-2 block text-xs font-semibold uppercase text-blue-700">
+              Analyzed: {headline.analysisDepth ?? "Headline only"}
+              {headline.analyzedWordCount
+                ? ` | ${headline.analyzedWordCount} words`
+                : ""}
+            </span>
+            {headline.summary ? (
+              <span className="mt-2 block text-sm leading-6 text-slate-600">
+                {formatNewsSummary(headline.summary)}
+              </span>
+            ) : null}
           </a>
         ))}
       </div>
@@ -902,6 +928,12 @@ function formatNewsWindow(generatedAt: string) {
   const start = new Date(end.getTime() - 72 * 60 * 60 * 1000);
 
   return `${start.toLocaleString()} to ${end.toLocaleString()}`;
+}
+
+function formatNewsSummary(summary: string) {
+  return summary.length > 280
+    ? `${summary.slice(0, 277).trim()}...`
+    : summary;
 }
 
 async function fetchJsonWithRetry<T>(url: string, retries = 1): Promise<T> {

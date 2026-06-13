@@ -1,4 +1,8 @@
 import type { AgentPick, TrendHeadline } from "../types";
+import {
+  enrichHeadlineEvidence,
+  htmlToPlainText,
+} from "./articleEvidence";
 import { analyzeNewsSentiment } from "./financialSentiment";
 import { unavailableHistory } from "./historicalTrend";
 import { recommendStrategy } from "./strategyRecommendation";
@@ -184,6 +188,12 @@ export async function runUsTrendAgent() {
     });
   }
 
+  const enrichedEvidence = await enrichHeadlineEvidence(
+    validatedMentions.flatMap((mention) => mention.headlines),
+  );
+  const enrichedHeadlineByLink = new Map(
+    enrichedEvidence.headlines.map((headline) => [headline.link, headline]),
+  );
   const signals = buildQuoteSignals(quotes, "US", "finnhub");
   const signalBySymbol = new Map(signals.map((signal) => [signal.symbol, signal]));
   const picks = validatedMentions
@@ -192,8 +202,15 @@ export async function runUsTrendAgent() {
 
       if (!signal) return null;
 
-      const latestPublishedAt = getLatestPublishedAt(mention.headlines);
-      const sentiment = analyzeNewsSentiment(mention.headlines);
+      const analyzedHeadlines = mention.headlines.map(
+        (headline) => enrichedHeadlineByLink.get(headline.link) ?? headline,
+      );
+      const latestPublishedAt = getLatestPublishedAt(analyzedHeadlines);
+      const sentiment = analyzeNewsSentiment(
+        analyzedHeadlines,
+        enrichedEvidence.evidenceByLink,
+        [mention.symbol, mention.company.title],
+      );
       const history = unavailableHistory(
         "Unavailable: the configured Finnhub plan does not permit the daily candle endpoint, so 20/60-session returns, moving averages and drawdown are not calculated.",
       );
@@ -217,9 +234,9 @@ export async function runUsTrendAgent() {
         strategy,
         sentiment,
         history,
-        reason: `${mention.symbol} was validated with ${mention.headlines.length} company-specific headline${mention.headlines.length === 1 ? "" : "s"} from ${mention.sourceCount} source${mention.sourceCount === 1 ? "" : "s"} and a current Finnhub quote snapshot. Entry, stop and target values are Stock Analyzer calculations, not Finnhub predictions.`,
+        reason: `${mention.symbol} was validated with ${mention.headlines.length} company-specific report${mention.headlines.length === 1 ? "" : "s"} from ${mention.sourceCount} source${mention.sourceCount === 1 ? "" : "s"}, ${sentiment.fullTextArticles} full-text analysis, ${sentiment.summaryArticles} summary analysis, and a current Finnhub quote snapshot. Entry, stop and target values are Stock Analyzer calculations, not Finnhub predictions.`,
         signal,
-        headlines: sortHeadlinesNewestFirst(mention.headlines).slice(0, 3),
+        headlines: sortHeadlinesNewestFirst(analyzedHeadlines).slice(0, 3),
       } satisfies AgentPick;
     })
     .filter((pick): pick is AgentPick => Boolean(pick))
@@ -323,6 +340,7 @@ async function fetchFinnhubCompanyNews(
           link: item.url,
           source: item.source || "Finnhub Company News",
           publishedAt,
+          summary: htmlToPlainText(item.summary) || null,
         };
       })
       .filter((headline): headline is TrendHeadline => Boolean(headline))
@@ -412,6 +430,7 @@ function buildUsMentions(
       link: item.url,
       source: item.source || "Finnhub Market News",
       publishedAt,
+      summary: htmlToPlainText(item.summary) || null,
     };
     for (const company of secCompanies) {
       if (companyMatchesHeadline(company, item.headline)) {
@@ -465,6 +484,7 @@ function buildLatestMarketNews(
         link: item.url,
         source: item.source || "Finnhub Market News",
         publishedAt,
+        summary: htmlToPlainText(item.summary) || null,
       };
     })
     .filter((headline): headline is TrendHeadline => Boolean(headline));
@@ -555,12 +575,16 @@ function addMention(
 
 function parseRss(xml: string, source: string): TrendHeadline[] {
   return [...xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)]
-    .map((match) => {
+    .map((match): TrendHeadline | null => {
       const item = match[0];
       const title = getXmlValue(item, "title");
       const link = getXmlValue(item, "link");
       const publishedAt =
         getXmlValue(item, "pubDate") || getXmlValue(item, "dc:date");
+      const summary = htmlToPlainText(
+        getXmlValue(item, "content:encoded") ||
+          getXmlValue(item, "description"),
+      );
 
       if (!title || !link) return null;
 
@@ -569,6 +593,7 @@ function parseRss(xml: string, source: string): TrendHeadline[] {
         link,
         source,
         publishedAt: parsePublishedAt(publishedAt),
+        summary: summary || null,
       };
     })
     .filter((headline): headline is TrendHeadline => Boolean(headline))

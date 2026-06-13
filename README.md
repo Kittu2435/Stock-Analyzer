@@ -9,6 +9,8 @@ India and US stock research scanner using current news and live quote snapshots.
 - If no symbols are entered, scans Zerodha holdings and open positions.
 - Produces a practical signal card with entry, stop-loss, target, exit rule, confidence, and trend/volume/risk scores.
 - Labels agent ideas as `Intraday`, `Swing`, `Long Term`, `F&O`, or `No Trade`, with the intended holding period and visible reason.
+- Reads publicly accessible article bodies when available, falls back to substantive RSS/Finnhub summaries, and labels headline-only evidence.
+- Prevents headline-only sentiment from producing an actionable recommendation.
 - Avoids hardcoded stocks, hardcoded news, invented credibility scores, and Alpha Vantage quota limits.
 
 ## Zerodha setup
@@ -50,6 +52,7 @@ server-rendered Next.js applications through Next.js 15.
 4. Add these environment variables in the Amplify app settings:
 
 ```bash
+APP_URL=https://develop.example-id.amplifyapp.com
 KITE_API_KEY=your_key
 KITE_API_SECRET=your_secret
 FINNHUB_API_KEY=your_key
@@ -73,6 +76,7 @@ https://develop.example-id.amplifyapp.com/api/brokers/zerodha/callback
 
 The protocol, domain, path, and deployment environment must match exactly.
 Preview deployment domains should not be used as the permanent Zerodha callback.
+`APP_URL` must contain the same Amplify domain without the callback path.
 
 7. Open the production site and select `Connect Zerodha`.
 
@@ -87,6 +91,12 @@ retain monitoring state between runs.
 The India agent uses current RSS feeds from LiveMint, Economic Times, and Moneycontrol, then validates matched NSE stocks with Zerodha history and live quotes.
 
 News publications do not receive manually invented credibility numbers. Picks are ordered using visible evidence: independent source count, article freshness, live quote decision, and quote confidence.
+
+Article text extraction prefers publisher-provided structured `articleBody`
+metadata and then semantic article paragraphs. It does not bypass paywalls or
+publisher access controls. Full article text remains server-side; the UI shows
+the extraction depth, analyzed word count, short source summary, and matched
+financial evidence.
 
 The US agent combines Finnhub market news with current company-specific stories from Moneycontrol Market Reports, CNBC Finance, and MarketWatch. RSS stories are mapped conservatively with the official SEC company ticker directory, and Finnhub validates matched symbols with current quote snapshots. It remains unavailable until `FINNHUB_API_KEY` is configured.
 

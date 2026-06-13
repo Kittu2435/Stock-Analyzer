@@ -71,6 +71,9 @@ export type TrendHeadline = {
   link: string;
   source: string;
   publishedAt: string | null;
+  summary?: string | null;
+  analysisDepth?: "Full article" | "Summary" | "Headline only";
+  analyzedWordCount?: number;
 };
 
 export type AgentPick = {
@@ -90,6 +93,11 @@ export type AgentPick = {
     positiveHeadlines: number;
     negativeHeadlines: number;
     neutralHeadlines: number;
+    fullTextArticles: number;
+    summaryArticles: number;
+    headlineOnlyArticles: number;
+    explicitEvidenceArticles: number;
+    evidenceQuality: "Strong" | "Moderate" | "Weak";
     evidence: string[];
   };
   history: {

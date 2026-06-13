@@ -13,6 +13,18 @@ export function recommendStrategy(input: StrategyInput): AgentPick["strategy"] {
   const newsAgeHours =
     (Date.now() - new Date(input.latestPublishedAt).getTime()) / 36e5;
 
+  if (
+    input.sentiment.evidenceQuality === "Weak" ||
+    input.sentiment.explicitEvidenceArticles === 0
+  ) {
+    return strategy(
+      "No Trade",
+      "Wait for article-level evidence",
+      input.fnoEligible,
+      "The available coverage is headline-only or contains no explicit financial event. A headline by itself cannot produce an entry recommendation.",
+    );
+  }
+
   if (input.verdict === "Avoid" || input.signal.decision === "Avoid") {
     return strategy(
       "No Trade",
