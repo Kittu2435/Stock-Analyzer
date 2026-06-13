@@ -1,4 +1,8 @@
 import type { AgentPick, TrendHeadline } from "../types";
+import {
+  enrichHeadlineEvidence,
+  htmlToPlainText,
+} from "./articleEvidence";
 import { analyzeNewsSentiment } from "./financialSentiment";
 import {
   analyzeHistoricalTrend,
@@ -133,17 +137,30 @@ export async function runMarketTrendAgent(accessToken: string) {
       } => Boolean(candidate),
     )
     .slice(0, 8);
+  const enrichedEvidence = await enrichHeadlineEvidence(
+    candidates.flatMap((candidate) => candidate.mention.headlines),
+  );
+  const enrichedHeadlineByLink = new Map(
+    enrichedEvidence.headlines.map((headline) => [headline.link, headline]),
+  );
   const picks: AgentPick[] = [];
 
   for (const candidate of candidates) {
     const { mention, signal } = candidate;
-    const latestPublishedAt = getLatestPublishedAt(mention.headlines);
-    const sentiment = analyzeNewsSentiment(mention.headlines);
+    const analyzedHeadlines = mention.headlines.map(
+      (headline) => enrichedHeadlineByLink.get(headline.link) ?? headline,
+    );
+    const latestPublishedAt = getLatestPublishedAt(analyzedHeadlines);
+    const sentiment = analyzeNewsSentiment(
+      analyzedHeadlines,
+      enrichedEvidence.evidenceByLink,
+      [mention.instrument.tradingsymbol, mention.instrument.name],
+    );
     const history = await loadHistoricalAnalysis(
       mention.instrument.instrumentToken,
       accessToken,
     );
-    const verdict = getAgentVerdict(sentiment.label, history, signal.decision);
+    const verdict = getAgentVerdict(sentiment, history, signal.decision);
     const strategy = recommendStrategy({
       verdict,
       sentiment,
@@ -162,9 +179,14 @@ export async function runMarketTrendAgent(accessToken: string) {
       strategy,
       sentiment,
       history,
-      reason: getAgentReason(mention, latestPublishedAt, verdict),
+      reason: getAgentReason(
+        mention,
+        latestPublishedAt,
+        verdict,
+        sentiment,
+      ),
       signal,
-      headlines: sortHeadlinesNewestFirst(mention.headlines).slice(0, 3),
+      headlines: sortHeadlinesNewestFirst(analyzedHeadlines).slice(0, 3),
     });
 
     await wait(350);
@@ -221,11 +243,15 @@ async function fetchMarketHeadlines(): Promise<NewsBatch> {
 
 function parseRss(xml: string, source: string): TrendHeadline[] {
   return [...xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)]
-    .map((match) => {
+    .map((match): TrendHeadline | null => {
       const item = match[0];
       const title = getXmlValue(item, "title");
       const link = getXmlValue(item, "link");
       const publishedAt = getXmlValue(item, "pubDate") || getXmlValue(item, "dc:date");
+      const summary = htmlToPlainText(
+        getXmlValue(item, "content:encoded") ||
+          getXmlValue(item, "description"),
+      );
 
       if (!title || !link) return null;
 
@@ -234,6 +260,7 @@ function parseRss(xml: string, source: string): TrendHeadline[] {
         link,
         source,
         publishedAt: parsePublishedAt(publishedAt),
+        summary: summary || null,
       };
     })
     .filter((headline): headline is TrendHeadline => Boolean(headline))
@@ -356,10 +383,11 @@ function getAgentReason(
   mention: SymbolMention,
   latestPublishedAt: string,
   verdict: AgentPick["verdict"],
+  sentiment: AgentPick["sentiment"],
 ) {
   const sources = [...new Set(mention.headlines.map((headline) => headline.source))];
 
-  return `${verdict}: ${mention.instrument.name} appears in ${mention.headlines.length} recent headline${mention.headlines.length === 1 ? "" : "s"} from ${sources.length} independent source${sources.length === 1 ? "" : "s"}. Latest coverage: ${formatAge(latestPublishedAt)}.`;
+  return `${verdict}: ${mention.instrument.name} appears in ${mention.headlines.length} recent report${mention.headlines.length === 1 ? "" : "s"} from ${sources.length} independent source${sources.length === 1 ? "" : "s"}. Evidence quality is ${sentiment.evidenceQuality.toLowerCase()} with ${sentiment.fullTextArticles} full-text and ${sentiment.summaryArticles} summary analysis. Latest coverage: ${formatAge(latestPublishedAt)}.`;
 }
 
 function getLatestPublishedAt(headlines: TrendHeadline[]) {
@@ -589,13 +617,20 @@ function parseDailyCandle(candle: unknown): DailyCandle | null {
 }
 
 function getAgentVerdict(
-  sentiment: AgentPick["sentiment"]["label"],
+  sentiment: AgentPick["sentiment"],
   history: AgentPick["history"],
   quoteDecision: AgentPick["signal"]["decision"],
 ): AgentPick["verdict"] {
   if (history.status === "Unavailable") return "Watch";
 
-  if (sentiment === "Positive") {
+  if (sentiment.label === "Positive") {
+    if (
+      sentiment.evidenceQuality === "Weak" ||
+      sentiment.explicitEvidenceArticles === 0
+    ) {
+      return "Watch";
+    }
+
     if (history.trend === "Bullish" && quoteDecision === "Actionable") {
       return "Consider";
     }
@@ -605,14 +640,14 @@ function getAgentVerdict(
       : "Watch";
   }
 
-  if (sentiment === "Negative") {
+  if (sentiment.label === "Negative") {
     return history.trend === "Bullish" && quoteDecision !== "Avoid"
       ? "Watch"
       : "Avoid";
   }
 
   if (
-    sentiment === "Mixed" &&
+    sentiment.label === "Mixed" &&
     history.trend === "Bullish" &&
     quoteDecision !== "Avoid"
   ) {

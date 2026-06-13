@@ -6,7 +6,6 @@ frontend:
         - npm ci
     build:
       commands:
-        - env | grep -E '^(KITE_API_KEY|KITE_API_SECRET|FINNHUB_API_KEY)=' > .env.production
         - npm run build
   artifacts:
     baseDirectory: .next

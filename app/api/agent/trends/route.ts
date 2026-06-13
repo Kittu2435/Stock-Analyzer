@@ -6,6 +6,7 @@ import {
 } from "../../../lib/zerodha";
 import { runMarketTrendAgent } from "../../../lib/marketTrendAgent";
 import { runUsTrendAgent } from "../../../lib/usTrendAgent";
+import { getServerConfig } from "../../../lib/serverConfig";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -27,8 +28,9 @@ export async function GET(request: NextRequest) {
     const accessToken = getZerodhaAccessToken(
       cookieStore.get(kiteCookieName)?.value,
     );
+    const { KITE_API_KEY: apiKey } = await getServerConfig();
 
-    if (!accessToken || !process.env.KITE_API_KEY) {
+    if (!accessToken || !apiKey) {
       return NextResponse.json({
         generatedAt: new Date().toISOString(),
         picks: [],

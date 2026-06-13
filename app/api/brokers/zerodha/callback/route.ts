@@ -5,7 +5,7 @@ export async function GET(request: NextRequest) {
   const requestToken = request.nextUrl.searchParams.get("request_token");
   const status = request.nextUrl.searchParams.get("status");
   const action = request.nextUrl.searchParams.get("action");
-  const redirectUrl = new URL("/", request.url);
+  const redirectUrl = new URL("/", getPublicAppOrigin(request));
 
   if (!requestToken || status === "error" || action === "error") {
     redirectUrl.searchParams.set("zerodha", "failed");
@@ -33,6 +33,22 @@ export async function GET(request: NextRequest) {
     redirectUrl.searchParams.set("reason", "token_exchange_failed");
     return NextResponse.redirect(redirectUrl);
   }
+}
+
+function getPublicAppOrigin(request: NextRequest) {
+  const forwardedHost = request.headers
+    .get("x-forwarded-host")
+    ?.split(",")[0]
+    .trim();
+  const forwardedProtocol =
+    request.headers.get("x-forwarded-proto")?.split(",")[0].trim() ||
+    "https";
+
+  if (forwardedHost) {
+    return `${forwardedProtocol}://${forwardedHost}`;
+  }
+
+  return request.nextUrl.origin;
 }
 
 function secondsUntilNextKiteExpiry() {

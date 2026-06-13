@@ -9,6 +9,8 @@ India and US stock research scanner using current news and live quote snapshots.
 - If no symbols are entered, scans Zerodha holdings and open positions.
 - Produces a practical signal card with entry, stop-loss, target, exit rule, confidence, and trend/volume/risk scores.
 - Labels agent ideas as `Intraday`, `Swing`, `Long Term`, `F&O`, or `No Trade`, with the intended holding period and visible reason.
+- Reads publicly accessible article bodies when available, falls back to substantive RSS/Finnhub summaries, and labels headline-only evidence.
+- Prevents headline-only sentiment from producing an actionable recommendation.
 - Avoids hardcoded stocks, hardcoded news, invented credibility scores, and Alpha Vantage quota limits.
 
 ## Zerodha setup
@@ -45,26 +47,33 @@ server-rendered Next.js applications through Next.js 15.
 2. In the AWS Amplify console, choose **Create new app**, connect GitHub, select
    `Kittu2435/Stock-Analyzer`, and select the `develop` branch.
 3. Keep the detected SSR build settings. The committed `amplify.yml` runs
-   `npm ci`, creates the server runtime environment file, and runs the production
-   build.
-4. Add these environment variables in the Amplify app settings:
+   `npm ci` and the production build without copying secrets into build files.
+4. In AWS Secrets Manager, create a secret named
+   `stock-analyzer/production` using the JSON key/value secret type:
 
-```bash
-KITE_API_KEY=your_key
-KITE_API_SECRET=your_secret
-FINNHUB_API_KEY=your_key
+```json
+{
+  "KITE_API_KEY": "your_key",
+  "KITE_API_SECRET": "your_secret",
+  "FINNHUB_API_KEY": "your_key"
+}
 ```
 
-Do not add `KITE_ACCESS_TOKEN` in cloud configuration. It expires daily and the
-browser login flow stores the current token in a secure HTTP-only cookie.
+5. Create an IAM role for Amplify Hosting compute and grant only
+   `secretsmanager:GetSecretValue` for the exact secret ARN shown by Secrets
+   Manager. Attach this role to the Amplify app as its SSR compute role.
 
-5. Deploy and copy the final HTTPS domain, for example:
+Do not store these values in Amplify environment variables. Do not add
+`KITE_ACCESS_TOKEN` to Secrets Manager. It expires daily and the browser login
+flow stores the current token in a secure HTTP-only cookie.
+
+6. Deploy and copy the final HTTPS domain, for example:
 
 ```text
 https://develop.example-id.amplifyapp.com
 ```
 
-6. In the Zerodha Kite Connect developer console, set the registered redirect
+7. In the Zerodha Kite Connect developer console, set the registered redirect
 URL to:
 
 ```text
@@ -73,8 +82,10 @@ https://develop.example-id.amplifyapp.com/api/brokers/zerodha/callback
 
 The protocol, domain, path, and deployment environment must match exactly.
 Preview deployment domains should not be used as the permanent Zerodha callback.
+The app reads Amplify's forwarded request host in production and the request
+origin locally, so no deployed URL environment variable is required.
 
-7. Open the production site and select `Connect Zerodha`.
+8. Open the production site and select `Connect Zerodha`.
 
 The selected news market refreshes automatically every five minutes while the
 app is open and visible. US trend responses are cached at the cloud edge for
@@ -87,6 +98,12 @@ retain monitoring state between runs.
 The India agent uses current RSS feeds from LiveMint, Economic Times, and Moneycontrol, then validates matched NSE stocks with Zerodha history and live quotes.
 
 News publications do not receive manually invented credibility numbers. Picks are ordered using visible evidence: independent source count, article freshness, live quote decision, and quote confidence.
+
+Article text extraction prefers publisher-provided structured `articleBody`
+metadata and then semantic article paragraphs. It does not bypass paywalls or
+publisher access controls. Full article text remains server-side; the UI shows
+the extraction depth, analyzed word count, short source summary, and matched
+financial evidence.
 
 The US agent combines Finnhub market news with current company-specific stories from Moneycontrol Market Reports, CNBC Finance, and MarketWatch. RSS stories are mapped conservatively with the official SEC company ticker directory, and Finnhub validates matched symbols with current quote snapshots. It remains unavailable until `FINNHUB_API_KEY` is configured.
 
