@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { getServerConfig } from "./serverConfig";
 
 const kiteBaseUrl = "https://api.kite.trade";
 const kiteCookieName = "kite_access_token";
@@ -21,9 +22,9 @@ type KiteErrorResponse = {
 
 export { kiteCookieName };
 
-export function getZerodhaStatus() {
-  const apiKey = process.env.KITE_API_KEY;
-  const apiSecret = process.env.KITE_API_SECRET;
+export async function getZerodhaStatus() {
+  const { KITE_API_KEY: apiKey, KITE_API_SECRET: apiSecret } =
+    await getServerConfig();
   const missing = [
     ["KITE_API_KEY", apiKey],
     ["KITE_API_SECRET", apiSecret],
@@ -43,8 +44,8 @@ export function getZerodhaStatus() {
   };
 }
 
-export function getZerodhaLoginUrl() {
-  const apiKey = process.env.KITE_API_KEY;
+export async function getZerodhaLoginUrl() {
+  const { KITE_API_KEY: apiKey } = await getServerConfig();
 
   if (!apiKey) {
     return null;
@@ -58,8 +59,8 @@ export function getZerodhaLoginUrl() {
 }
 
 export async function exchangeRequestToken(requestToken: string) {
-  const apiKey = process.env.KITE_API_KEY;
-  const apiSecret = process.env.KITE_API_SECRET;
+  const { KITE_API_KEY: apiKey, KITE_API_SECRET: apiSecret } =
+    await getServerConfig();
 
   if (!apiKey || !apiSecret) {
     throw new Error("KITE_API_KEY and KITE_API_SECRET are required.");
@@ -112,7 +113,7 @@ export async function fetchZerodhaQuotes(
   instruments: string[],
   accessTokenOverride?: string,
 ) {
-  const apiKey = process.env.KITE_API_KEY;
+  const { KITE_API_KEY: apiKey } = await getServerConfig();
   const accessToken = getZerodhaAccessToken(accessTokenOverride);
 
   if (!apiKey || !accessToken) {
@@ -158,7 +159,7 @@ export async function fetchZerodhaInstruments(
   accessTokenOverride?: string,
   exchange: "NFO" | "NSE" = "NSE",
 ) {
-  const apiKey = process.env.KITE_API_KEY;
+  const { KITE_API_KEY: apiKey } = await getServerConfig();
   const accessToken = getZerodhaAccessToken(accessTokenOverride);
 
   if (!apiKey || !accessToken) {
@@ -206,7 +207,7 @@ export async function fetchZerodhaDailyCandles(
   to: string,
   accessTokenOverride?: string,
 ) {
-  const apiKey = process.env.KITE_API_KEY;
+  const { KITE_API_KEY: apiKey } = await getServerConfig();
   const accessToken = getZerodhaAccessToken(accessTokenOverride);
 
   if (!apiKey || !accessToken) {
@@ -261,7 +262,7 @@ export async function fetchZerodhaDailyCandles(
 }
 
 async function fetchZerodhaEndpoint(path: string, accessTokenOverride?: string) {
-  const apiKey = process.env.KITE_API_KEY;
+  const { KITE_API_KEY: apiKey } = await getServerConfig();
   const accessToken = getZerodhaAccessToken(accessTokenOverride);
 
   if (!apiKey || !accessToken) {

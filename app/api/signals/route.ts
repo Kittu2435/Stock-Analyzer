@@ -12,6 +12,7 @@ import {
   type KiteQuote,
 } from "../../lib/zerodhaSignalEngine";
 import { normalizeNseSymbol } from "../../lib/nseSymbols";
+import { getServerConfig } from "../../lib/serverConfig";
 
 export async function GET(request: NextRequest) {
   try {
@@ -44,13 +45,14 @@ async function getSignalsResponse(request: NextRequest) {
   const accessToken = getZerodhaAccessToken(
     cookieStore.get(kiteCookieName)?.value,
   );
+  const { KITE_API_KEY: apiKey } = await getServerConfig();
   const requestedSymbols = request.nextUrl.searchParams
     .get("symbols")
     ?.split(",")
     .map(normalizeNseSymbol)
     .filter(Boolean);
 
-  if (!accessToken || !process.env.KITE_API_KEY) {
+  if (!accessToken || !apiKey) {
     return NextResponse.json({
       generatedAt,
       provider: "zerodha",

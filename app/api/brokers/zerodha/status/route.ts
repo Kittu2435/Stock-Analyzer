@@ -9,6 +9,7 @@ import {
 
 export async function GET() {
   const cookieStore = await cookies();
+  const zerodhaStatus = await getZerodhaStatus();
   const cookieToken = cookieStore.get(kiteCookieName)?.value;
   const accessToken = getZerodhaAccessToken(cookieToken);
   const profileResult = accessToken
@@ -23,7 +24,7 @@ export async function GET() {
     message:
       profileResult?.message ??
       "Connect Zerodha to enable live Indian market data.",
-    ...getZerodhaStatus(),
+    ...zerodhaStatus,
   });
 
   if (profileResult?.reconnectRequired) {

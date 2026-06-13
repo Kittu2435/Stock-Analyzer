@@ -36,10 +36,6 @@ export async function GET(request: NextRequest) {
 }
 
 function getPublicAppOrigin(request: NextRequest) {
-  const configuredOrigin = parseOrigin(process.env.APP_URL);
-
-  if (configuredOrigin) return configuredOrigin;
-
   const forwardedHost = request.headers
     .get("x-forwarded-host")
     ?.split(",")[0]
@@ -53,20 +49,6 @@ function getPublicAppOrigin(request: NextRequest) {
   }
 
   return request.nextUrl.origin;
-}
-
-function parseOrigin(value?: string) {
-  if (!value) return null;
-
-  try {
-    const url = new URL(value);
-
-    if (!["https:", "http:"].includes(url.protocol)) return null;
-
-    return url.origin;
-  } catch {
-    return null;
-  }
 }
 
 function secondsUntilNextKiteExpiry() {

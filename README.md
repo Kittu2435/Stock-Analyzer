@@ -47,27 +47,33 @@ server-rendered Next.js applications through Next.js 15.
 2. In the AWS Amplify console, choose **Create new app**, connect GitHub, select
    `Kittu2435/Stock-Analyzer`, and select the `develop` branch.
 3. Keep the detected SSR build settings. The committed `amplify.yml` runs
-   `npm ci`, creates the server runtime environment file, and runs the production
-   build.
-4. Add these environment variables in the Amplify app settings:
+   `npm ci` and the production build without copying secrets into build files.
+4. In AWS Secrets Manager, create a secret named
+   `stock-analyzer/production` using the JSON key/value secret type:
 
-```bash
-APP_URL=https://develop.example-id.amplifyapp.com
-KITE_API_KEY=your_key
-KITE_API_SECRET=your_secret
-FINNHUB_API_KEY=your_key
+```json
+{
+  "KITE_API_KEY": "your_key",
+  "KITE_API_SECRET": "your_secret",
+  "FINNHUB_API_KEY": "your_key"
+}
 ```
 
-Do not add `KITE_ACCESS_TOKEN` in cloud configuration. It expires daily and the
-browser login flow stores the current token in a secure HTTP-only cookie.
+5. Create an IAM role for Amplify Hosting compute and grant only
+   `secretsmanager:GetSecretValue` for the exact secret ARN shown by Secrets
+   Manager. Attach this role to the Amplify app as its SSR compute role.
 
-5. Deploy and copy the final HTTPS domain, for example:
+Do not store these values in Amplify environment variables. Do not add
+`KITE_ACCESS_TOKEN` to Secrets Manager. It expires daily and the browser login
+flow stores the current token in a secure HTTP-only cookie.
+
+6. Deploy and copy the final HTTPS domain, for example:
 
 ```text
 https://develop.example-id.amplifyapp.com
 ```
 
-6. In the Zerodha Kite Connect developer console, set the registered redirect
+7. In the Zerodha Kite Connect developer console, set the registered redirect
 URL to:
 
 ```text
@@ -76,9 +82,10 @@ https://develop.example-id.amplifyapp.com/api/brokers/zerodha/callback
 
 The protocol, domain, path, and deployment environment must match exactly.
 Preview deployment domains should not be used as the permanent Zerodha callback.
-`APP_URL` must contain the same Amplify domain without the callback path.
+The app reads Amplify's forwarded request host in production and the request
+origin locally, so no deployed URL environment variable is required.
 
-7. Open the production site and select `Connect Zerodha`.
+8. Open the production site and select `Connect Zerodha`.
 
 The selected news market refreshes automatically every five minutes while the
 app is open and visible. US trend responses are cached at the cloud edge for

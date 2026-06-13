@@ -6,6 +6,7 @@ import {
 import { analyzeNewsSentiment } from "./financialSentiment";
 import { unavailableHistory } from "./historicalTrend";
 import { recommendStrategy } from "./strategyRecommendation";
+import { getServerConfig } from "./serverConfig";
 import {
   buildQuoteSignals,
   type KiteQuote,
@@ -98,7 +99,7 @@ const ambiguousSingleWordCompanies = new Set([
 ]);
 
 export async function runUsTrendAgent() {
-  const apiKey = process.env.FINNHUB_API_KEY;
+  const { FINNHUB_API_KEY: apiKey } = await getServerConfig();
 
   if (!apiKey) {
     return {

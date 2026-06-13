@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getZerodhaLoginUrl } from "../../../../lib/zerodha";
 
-export function GET() {
-  const loginUrl = getZerodhaLoginUrl();
+export async function GET() {
+  const loginUrl = await getZerodhaLoginUrl();
 
   if (!loginUrl) {
     return NextResponse.json(
