@@ -135,6 +135,19 @@ export type IndiaIpoCandidate = {
   sourceCount: number;
   sentiment: AgentPick["sentiment"];
   headlines: TrendHeadline[];
+  assessment: {
+    decision: "Apply" | "Wait" | "Do not apply";
+    passedRequiredChecks: number;
+    totalRequiredChecks: number;
+    blockingReasons: string[];
+    metrics: {
+      label: string;
+      status: "Pass" | "Concern" | "Missing" | "Pending" | "Information";
+      value: string;
+      consideration: string;
+      required: boolean;
+    }[];
+  };
   companyAnalysis: {
     coverage: "Complete" | "Partial" | "Unavailable";
     sections: string[];

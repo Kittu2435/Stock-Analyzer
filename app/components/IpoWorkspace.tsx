@@ -190,6 +190,8 @@ function IpoCard({ ipo }: { ipo: IndiaIpoCandidate }) {
         />
       </dl>
 
+      <DecisionPanel ipo={ipo} />
+
       <div className="mt-4 grid gap-5 lg:grid-cols-2">
         <section>
           <h5 className="text-sm font-semibold text-slate-950">
@@ -295,6 +297,112 @@ function IpoCard({ ipo }: { ipo: IndiaIpoCandidate }) {
         </div>
       </details>
     </article>
+  );
+}
+
+function DecisionPanel({ ipo }: { ipo: IndiaIpoCandidate }) {
+  const assessment = ipo.assessment;
+  const decisionClass = {
+    Apply: "border-emerald-300 bg-emerald-50 text-emerald-950",
+    Wait: "border-amber-300 bg-amber-50 text-amber-950",
+    "Do not apply": "border-red-300 bg-red-50 text-red-950",
+  }[assessment.decision];
+
+  return (
+    <section className="mt-4 border-t border-slate-200 pt-4">
+      <div
+        className={`flex flex-col gap-3 border p-4 sm:flex-row sm:items-center sm:justify-between ${decisionClass}`}
+      >
+        <div>
+          <p className="text-xs font-semibold uppercase">Application decision</p>
+          <p className="mt-1 text-2xl font-semibold">{assessment.decision}</p>
+        </div>
+        <div className="sm:text-right">
+          <p className="text-sm font-semibold">
+            {assessment.passedRequiredChecks} of{" "}
+            {assessment.totalRequiredChecks} required checks passed
+          </p>
+          <p className="mt-1 text-xs">
+            No weighted or manually assigned credibility score is used.
+          </p>
+        </div>
+      </div>
+
+      <h5 className="mt-4 text-sm font-semibold text-slate-950">
+        Application considerations
+      </h5>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+          <thead>
+            <tr className="border-b border-slate-300 text-xs uppercase text-slate-500">
+              <th className="py-2 pr-3 font-semibold">Metric</th>
+              <th className="py-2 pr-3 font-semibold">Status</th>
+              <th className="py-2 pr-3 font-semibold">Observed value</th>
+              <th className="py-2 font-semibold">How it affects the decision</th>
+            </tr>
+          </thead>
+          <tbody>
+            {assessment.metrics.map((metric) => (
+              <tr
+                className="border-b border-slate-200 align-top"
+                key={metric.label}
+              >
+                <td className="py-3 pr-3 font-semibold text-slate-950">
+                  {metric.label}
+                  {metric.required ? (
+                    <span className="ml-1 text-xs font-medium text-slate-500">
+                      Required
+                    </span>
+                  ) : null}
+                </td>
+                <td className="py-3 pr-3">
+                  <MetricStatus status={metric.status} />
+                </td>
+                <td className="max-w-xs py-3 pr-3 text-slate-700">
+                  {metric.value}
+                </td>
+                <td className="max-w-lg py-3 leading-6 text-slate-600">
+                  {metric.consideration}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {assessment.blockingReasons.length > 0 ? (
+        <div className="mt-3 border-l-2 border-amber-500 pl-3">
+          <p className="text-xs font-semibold uppercase text-slate-500">
+            Why the app is not saying Apply
+          </p>
+          <ul className="mt-2 grid gap-1 text-sm leading-6 text-slate-700">
+            {assessment.blockingReasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function MetricStatus({
+  status,
+}: {
+  status: IndiaIpoCandidate["assessment"]["metrics"][number]["status"];
+}) {
+  const statusClass = {
+    Pass: "bg-emerald-100 text-emerald-800",
+    Concern: "bg-red-100 text-red-800",
+    Missing: "bg-slate-200 text-slate-700",
+    Pending: "bg-amber-100 text-amber-800",
+    Information: "bg-blue-100 text-blue-800",
+  }[status];
+
+  return (
+    <span className={`inline-flex px-2 py-1 text-xs font-semibold ${statusClass}`}>
+      {status}
+    </span>
   );
 }
 

@@ -339,6 +339,14 @@ function buildIpoCandidate(
     sourceCount,
     companyAnalysis,
   );
+  const assessment = getIpoAssessment(
+    issue,
+    sentiment,
+    sourceCount,
+    minimumInvestment,
+    companyAnalysis,
+    verdict,
+  );
 
   return {
     category: issue.category,
@@ -373,7 +381,210 @@ function buildIpoCandidate(
     sourceCount,
     sentiment,
     headlines: sortHeadlinesNewestFirst(headlines).slice(0, 3),
+    assessment,
     companyAnalysis,
+  };
+}
+
+function getIpoAssessment(
+  issue: NormalizedIpoIssue,
+  sentiment: AgentPick["sentiment"],
+  sourceCount: number,
+  minimumInvestment: number | null,
+  analysis: CompanyAnalysis,
+  verdict: IndiaIpoCandidate["verdict"],
+): IndiaIpoCandidate["assessment"] {
+  const netWorth = getNumericValue(analysis.financials.netWorth);
+  const eps = getNumericValue(analysis.financials.basicEps);
+  const impliedPe =
+    issue.upperPrice && eps && eps > 0 ? issue.upperPrice / eps : null;
+  const hasIssueObjects = analysis.issueObjects.length > 0;
+  const generalPurposeOnly =
+    hasIssueObjects &&
+    analysis.issueObjects.every((value) =>
+      /general corporate purposes/i.test(value),
+    );
+  const adverseLitigation = Boolean(
+    analysis.litigationSummary &&
+      !isBenignDisclosure(analysis.litigationSummary),
+  );
+  const adverseRegulatory = Boolean(
+    analysis.regulatorySummary &&
+      hasAdverseRegulatoryText(analysis.regulatorySummary),
+  );
+  const hasNewsConfirmation =
+    sentiment.explicitEvidenceArticles > 0 &&
+    sourceCount > 0 &&
+    sentiment.label !== "Negative";
+  const isSme = issue.series.toUpperCase().includes("SME");
+  const metrics: IndiaIpoCandidate["assessment"]["metrics"] = [
+    {
+      label: "Issue availability",
+      status: issue.category === "Open now" ? "Pass" : "Pending",
+      value:
+        issue.category === "Open now"
+          ? "Open for application"
+          : `Opens ${issue.issueStartDate ?? "on a date not yet published"}`,
+      consideration:
+        issue.category === "Open now"
+          ? "An application decision can be made during the issue window."
+          : "Upcoming issues remain Wait until the subscription window opens.",
+      required: true,
+    },
+    {
+      label: "Official filing coverage",
+      status: analysis.coverage === "Complete" ? "Pass" : "Missing",
+      value: `${analysis.coverage}; ${analysis.sections.length} structured sections`,
+      consideration:
+        analysis.coverage === "Complete"
+          ? "Final or abridged documents and the required structured sections are available."
+          : "A DRHP alone is not enough. Audited financials, issue objects, litigation and regulatory sections are required.",
+      required: true,
+    },
+    {
+      label: "Profitability",
+      status:
+        analysis.financials.profitable === true
+          ? "Pass"
+          : analysis.financials.profitable === false
+            ? "Concern"
+            : "Missing",
+      value:
+        analysis.financials.profitAfterTax ??
+        "Profit after tax not available",
+      consideration:
+        analysis.financials.profitable === true
+          ? "The latest structured filing reports positive profit after tax."
+          : analysis.financials.profitable === false
+            ? "A latest-period loss is a rejection condition in the current rules."
+            : "Profitability cannot be assessed without usable audited values.",
+      required: true,
+    },
+    {
+      label: "Net worth",
+      status:
+        netWorth === null ? "Missing" : netWorth > 0 ? "Pass" : "Concern",
+      value: analysis.financials.netWorth ?? "Net worth not available",
+      consideration:
+        netWorth === null
+          ? "Positive net worth must be confirmed from the official filing."
+          : netWorth > 0
+            ? "The latest structured filing reports positive net worth."
+            : "Zero or negative net worth is a material balance-sheet concern.",
+      required: true,
+    },
+    {
+      label: "Use of IPO proceeds",
+      status: !hasIssueObjects
+        ? "Missing"
+        : generalPurposeOnly
+          ? "Concern"
+          : "Pass",
+      value: hasIssueObjects
+        ? analysis.issueObjects.join("; ")
+        : "Issue objects not available",
+      consideration: !hasIssueObjects
+        ? "The intended use of investor funds must be disclosed."
+        : generalPurposeOnly
+          ? "Only general corporate purposes are disclosed, providing limited specificity."
+          : "A specific disclosed use of proceeds is available for review.",
+      required: true,
+    },
+    {
+      label: "Litigation",
+      status: analysis.litigationSummary
+        ? adverseLitigation
+          ? "Concern"
+          : "Pass"
+        : "Missing",
+      value: analysis.litigationSummary ?? "Structured disclosure unavailable",
+      consideration: adverseLitigation
+        ? "Disclosed litigation and amounts need manual review before applying."
+        : analysis.litigationSummary
+          ? "No adverse litigation signal was extracted from the structured disclosure."
+          : "The litigation section must be available before an Apply decision.",
+      required: true,
+    },
+    {
+      label: "Regulatory and promoter record",
+      status: analysis.regulatorySummary
+        ? adverseRegulatory
+          ? "Concern"
+          : "Pass"
+        : "Missing",
+      value: analysis.regulatorySummary ?? "Structured disclosure unavailable",
+      consideration: adverseRegulatory
+        ? "Adverse regulatory or criminal disclosure is a rejection condition."
+        : analysis.regulatorySummary
+          ? "No adverse regulatory signal was extracted from the structured disclosure."
+          : "The regulatory section must be available before an Apply decision.",
+      required: true,
+    },
+    {
+      label: "Independent news confirmation",
+      status:
+        sentiment.label === "Negative"
+          ? "Concern"
+          : hasNewsConfirmation
+            ? "Pass"
+            : "Missing",
+      value: `${sentiment.explicitEvidenceArticles} evidence articles from ${sourceCount} sources; ${sentiment.label}`,
+      consideration:
+        sentiment.label === "Negative"
+          ? "Recent negative financial evidence is a rejection condition."
+          : hasNewsConfirmation
+            ? "Recent article-level evidence independently supports the company review."
+            : isSme
+              ? "At least one explicit independent article is required for an SME Apply decision."
+              : "News is corroborating evidence; the official filing remains primary for mainboard issues.",
+      required: isSme,
+    },
+    {
+      label: "Indicative valuation",
+      status: impliedPe === null ? "Missing" : "Information",
+      value:
+        impliedPe === null
+          ? "P/E cannot be calculated from available values"
+          : `Upper price / reported EPS: ${impliedPe.toFixed(2)}x`,
+      consideration:
+        "This is informational only until comparable listed-company valuation data is available.",
+      required: false,
+    },
+    {
+      label: "Liquidity and application exposure",
+      status:
+        isSme || (minimumInvestment !== null && minimumInvestment >= 100_000)
+          ? "Concern"
+          : "Information",
+      value: `${issue.series}; minimum ${
+        minimumInvestment === null
+          ? "not available"
+          : `INR ${minimumInvestment.toLocaleString("en-IN")}`
+      }`,
+      consideration: isSme
+        ? "SME issues can have higher lot concentration, lower liquidity and wider spreads after listing."
+        : "Review the minimum application against personal position-size limits.",
+      required: false,
+    },
+  ];
+  const requiredMetrics = metrics.filter((metric) => metric.required);
+  const blockingReasons = requiredMetrics
+    .filter((metric) => metric.status !== "Pass")
+    .map((metric) => `${metric.label}: ${metric.consideration}`);
+
+  return {
+    decision:
+      verdict === "Consider applying"
+        ? "Apply"
+        : verdict === "Avoid"
+          ? "Do not apply"
+          : "Wait",
+    passedRequiredChecks: requiredMetrics.filter(
+      (metric) => metric.status === "Pass",
+    ).length,
+    totalRequiredChecks: requiredMetrics.length,
+    blockingReasons,
+    metrics,
   };
 }
 
@@ -383,16 +594,42 @@ function getIpoVerdict(
   sourceCount: number,
   analysis: CompanyAnalysis,
 ): IndiaIpoCandidate["verdict"] {
+  const netWorth = getNumericValue(analysis.financials.netWorth);
+  const hasIssueObjects = analysis.issueObjects.length > 0;
+  const generalPurposeOnly =
+    hasIssueObjects &&
+    analysis.issueObjects.every((value) =>
+      /general corporate purposes/i.test(value),
+    );
+  const adverseLitigation = Boolean(
+    analysis.litigationSummary &&
+      !isBenignDisclosure(analysis.litigationSummary),
+  );
+  const adverseRegulatory = Boolean(
+    analysis.regulatorySummary &&
+      hasAdverseRegulatoryText(analysis.regulatorySummary),
+  );
+
   if (
     sentiment.label === "Negative" ||
     analysis.financials.profitable === false ||
-    analysis.concerns.some((concern) => concern.startsWith("Adverse regulatory"))
+    adverseRegulatory
   ) {
     return "Avoid";
   }
 
   if (analysis.coverage !== "Complete") return "Insufficient evidence";
   if (issue.category === "Upcoming") return "Watch";
+  if (
+    analysis.financials.profitable === null ||
+    netWorth === null ||
+    !hasIssueObjects ||
+    !analysis.litigationSummary ||
+    !analysis.regulatorySummary
+  ) {
+    return "Insufficient evidence";
+  }
+  if (netWorth <= 0 || generalPurposeOnly || adverseLitigation) return "Watch";
 
   const isSme = issue.series.toUpperCase().includes("SME");
   if (isSme && (sourceCount < 1 || sentiment.explicitEvidenceArticles === 0)) {
