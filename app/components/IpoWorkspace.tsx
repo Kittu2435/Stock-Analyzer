@@ -141,6 +141,7 @@ function IpoGroup({
 
 function IpoCard({ ipo }: { ipo: IndiaIpoCandidate }) {
   const analysis = ipo.companyAnalysis;
+  const decisionClass = getDecisionClass(ipo.assessment.decision);
   const documents = [
     ["DRHP", analysis.drhpUrl],
     ["RHP", analysis.rhpUrl],
@@ -160,14 +161,14 @@ function IpoCard({ ipo }: { ipo: IndiaIpoCandidate }) {
           </div>
           <p className="mt-2 text-sm leading-6 text-slate-600">{ipo.reason}</p>
         </div>
-        <a
-          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-center text-sm font-semibold text-slate-700 hover:text-blue-700"
-          href={ipo.sourceUrl}
-          rel="noreferrer"
-          target="_blank"
-        >
-          Official filings
-        </a>
+        <div className={`min-w-48 border p-3 text-center ${decisionClass}`}>
+          <p className="text-xs font-semibold uppercase">Should I apply?</p>
+          <p className="mt-1 text-xl font-semibold">{ipo.assessment.decision}</p>
+          <p className="mt-1 text-xs">
+            {ipo.assessment.passedRequiredChecks}/
+            {ipo.assessment.totalRequiredChecks} required checks passed
+          </p>
+        </div>
       </div>
 
       <dl className="mt-4 grid border-y border-slate-200 sm:grid-cols-2 lg:grid-cols-4">
@@ -275,6 +276,14 @@ function IpoCard({ ipo }: { ipo: IndiaIpoCandidate }) {
           </p>
           {documents.length > 0 ? (
             <div className="flex flex-wrap gap-2">
+              <a
+                className="font-semibold text-blue-700 hover:underline"
+                href={ipo.sourceUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                NSE offer documents
+              </a>
               {documents.map(([label, url]) => (
                 <a
                   className="font-semibold text-blue-700 hover:underline"
@@ -302,11 +311,7 @@ function IpoCard({ ipo }: { ipo: IndiaIpoCandidate }) {
 
 function DecisionPanel({ ipo }: { ipo: IndiaIpoCandidate }) {
   const assessment = ipo.assessment;
-  const decisionClass = {
-    Apply: "border-emerald-300 bg-emerald-50 text-emerald-950",
-    Wait: "border-amber-300 bg-amber-50 text-amber-950",
-    "Do not apply": "border-red-300 bg-red-50 text-red-950",
-  }[assessment.decision];
+  const decisionClass = getDecisionClass(assessment.decision);
 
   return (
     <section className="mt-4 border-t border-slate-200 pt-4">
@@ -384,6 +389,16 @@ function DecisionPanel({ ipo }: { ipo: IndiaIpoCandidate }) {
       ) : null}
     </section>
   );
+}
+
+function getDecisionClass(
+  decision: IndiaIpoCandidate["assessment"]["decision"],
+) {
+  return {
+    Apply: "border-emerald-300 bg-emerald-50 text-emerald-950",
+    Wait: "border-amber-300 bg-amber-50 text-amber-950",
+    "Do not apply": "border-red-300 bg-red-50 text-red-950",
+  }[decision];
 }
 
 function MetricStatus({
