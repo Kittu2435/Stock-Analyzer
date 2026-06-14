@@ -114,3 +114,24 @@ export type AgentPick = {
   signal: TradeSignal;
   headlines: TrendHeadline[];
 };
+
+export type IndiaIpoCandidate = {
+  companyName: string;
+  symbol: string;
+  series: string;
+  status: string;
+  issueStartDate: string | null;
+  issueEndDate: string | null;
+  priceBand: string | null;
+  issueSizeShares: number | null;
+  lotSize: number | null;
+  minimumInvestment: number | null;
+  verdict: "Consider applying" | "Watch" | "Avoid" | "Insufficient evidence";
+  reason: string;
+  listingGainEstimate: string;
+  riskFlags: string[];
+  sourceUrl: string;
+  sourceCount: number;
+  sentiment: AgentPick["sentiment"];
+  headlines: TrendHeadline[];
+};

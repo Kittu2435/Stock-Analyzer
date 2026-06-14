@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { normalizeNseSymbol } from "./lib/nseSymbols";
-import type { AgentPick, TradeSignal, TrendHeadline } from "./types";
+import type {
+  AgentPick,
+  IndiaIpoCandidate,
+  TradeSignal,
+  TrendHeadline,
+} from "./types";
 
 type SignalResponse = {
   generatedAt: string;
@@ -29,6 +34,13 @@ type AgentResponse = {
   latestNews?: TrendHeadline[];
 };
 
+type IpoResponse = {
+  generatedAt: string;
+  ipos: IndiaIpoCandidate[];
+  message?: string;
+  sources: string[];
+};
+
 type AgentMarket = "INDIA" | "US";
 
 export default function Home() {
@@ -48,6 +60,10 @@ export default function Home() {
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentMarket, setAgentMarket] = useState<AgentMarket>("INDIA");
   const [latestMarketNews, setLatestMarketNews] = useState<TrendHeadline[]>([]);
+  const [ipoCandidates, setIpoCandidates] = useState<IndiaIpoCandidate[]>([]);
+  const [ipoMessage, setIpoMessage] = useState<string | undefined>();
+  const [ipoSources, setIpoSources] = useState<string[]>([]);
+  const [ipoGeneratedAt, setIpoGeneratedAt] = useState<string | undefined>();
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   const actionableCount = useMemo(
@@ -135,15 +151,46 @@ export default function Home() {
     setAgentError(null);
 
     try {
-      const data = await fetchJsonWithRetry<AgentResponse>(
+      const trendRequest = fetchJsonWithRetry<AgentResponse>(
         `/api/agent/trends?market=${encodeURIComponent(agentMarket)}`,
         1,
       );
-      setAgentPicks(data.picks);
-      setAgentMessage(data.message);
-      setAgentSources(data.sources);
-      setAgentGeneratedAt(data.generatedAt);
-      setLatestMarketNews(data.latestNews ?? []);
+      const ipoRequest =
+        agentMarket === "INDIA"
+          ? fetchJsonWithRetry<IpoResponse>("/api/agent/ipos", 1)
+          : null;
+      const [trendResult, ipoResult] = await Promise.allSettled([
+        trendRequest,
+        ipoRequest ?? Promise.resolve(null),
+      ]);
+
+      if (trendResult.status === "fulfilled") {
+        const data = trendResult.value;
+        setAgentPicks(data.picks);
+        setAgentMessage(data.message);
+        setAgentSources(data.sources);
+        setAgentGeneratedAt(data.generatedAt);
+        setLatestMarketNews(data.latestNews ?? []);
+      } else {
+        setAgentPicks([]);
+        setAgentError(trendResult.reason instanceof Error
+          ? trendResult.reason.message
+          : "Trend agent could not load current sources.");
+      }
+
+      if (agentMarket === "INDIA" && ipoResult.status === "fulfilled" && ipoResult.value) {
+        setIpoCandidates(ipoResult.value.ipos);
+        setIpoMessage(ipoResult.value.message);
+        setIpoSources(ipoResult.value.sources);
+        setIpoGeneratedAt(ipoResult.value.generatedAt);
+      } else if (agentMarket === "INDIA" && ipoResult.status === "rejected") {
+        setIpoCandidates([]);
+        setIpoMessage(
+          ipoResult.reason instanceof Error
+            ? ipoResult.reason.message
+            : "IPO sources are temporarily unavailable.",
+        );
+      }
     } catch (requestError) {
       setAgentError(
         requestError instanceof Error
@@ -157,7 +204,6 @@ export default function Home() {
 
   useEffect(() => {
     if (!autoRefresh) return;
-    if (agentMarket === "INDIA" && !status?.connected) return;
 
     const initialTimer = window.setTimeout(runTrendAgent, 500);
     const interval = window.setInterval(() => {
@@ -170,7 +216,7 @@ export default function Home() {
       window.clearTimeout(initialTimer);
       window.clearInterval(interval);
     };
-  }, [agentMarket, autoRefresh, runTrendAgent, status?.connected]);
+  }, [agentMarket, autoRefresh, runTrendAgent]);
 
   function addDiscoveredSymbol(symbol: string) {
     setSymbols((currentSymbols) =>
@@ -297,6 +343,10 @@ export default function Home() {
                       setAgentGeneratedAt(undefined);
                       setAgentError(null);
                       setLatestMarketNews([]);
+                      setIpoCandidates([]);
+                      setIpoMessage(undefined);
+                      setIpoSources([]);
+                      setIpoGeneratedAt(undefined);
                     }}
                     type="button"
                   >
@@ -381,6 +431,43 @@ export default function Home() {
             </section>
           ) : null}
 
+          {agentMarket === "INDIA" ? (
+            <section className="mt-4 border-t border-slate-200 pt-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">Indian IPO watch</h3>
+                  <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
+                    Official NSE issue terms, checked against recent article-level
+                    evidence. Pre-listing IPOs have no price history, so listing
+                    gains and trade levels are not predicted.
+                  </p>
+                </div>
+                <div className="text-right text-xs font-medium uppercase text-slate-500">
+                  <p>{ipoSources.length > 0 ? `Sources: ${ipoSources.join(", ")}` : "Source: NSE India IPO"}</p>
+                  <p className="mt-1">
+                    Checked: {ipoGeneratedAt
+                      ? new Date(ipoGeneratedAt).toLocaleString()
+                      : "Waiting for refresh"}
+                  </p>
+                </div>
+              </div>
+
+              {ipoMessage ? (
+                <div className="mt-3">
+                  <StateCard title="IPO note" body={ipoMessage} tone="amber" />
+                </div>
+              ) : null}
+
+              {ipoCandidates.length > 0 ? (
+                <div className="mt-4 grid gap-4">
+                  {ipoCandidates.map((ipo) => (
+                    <IpoCard ipo={ipo} key={`${ipo.symbol}-${ipo.issueStartDate}`} />
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
           {agentPicks.length > 0 ? (
             <div className="mt-4 grid gap-4">
               {agentPicks.map((pick) => (
@@ -411,6 +498,100 @@ export default function Home() {
         </section>
       </section>
     </main>
+  );
+}
+
+function IpoCard({ ipo }: { ipo: IndiaIpoCandidate }) {
+  return (
+    <article className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="text-xl font-semibold">{ipo.companyName}</h4>
+            <Badge>{ipo.symbol}</Badge>
+            <Badge>{ipo.verdict}</Badge>
+            <Badge>{ipo.status}</Badge>
+            <Badge>{ipo.series}</Badge>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{ipo.reason}</p>
+        </div>
+        <a
+          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-center text-sm font-semibold text-slate-700 hover:text-blue-700"
+          href={ipo.sourceUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          View on NSE
+        </a>
+      </div>
+
+      <dl className="mt-3 grid gap-3 md:grid-cols-4">
+        <Info
+          label="Issue window"
+          value={formatIssueWindow(ipo.issueStartDate, ipo.issueEndDate)}
+        />
+        <Info label="Price band" value={ipo.priceBand ?? "Not published"} />
+        <Info
+          label="Lot size"
+          value={ipo.lotSize?.toLocaleString("en-IN") ?? "Not published"}
+        />
+        <Info
+          label="Minimum application"
+          value={ipo.minimumInvestment === null
+            ? "Not available"
+            : `INR ${formatMoney(ipo.minimumInvestment)}`}
+        />
+      </dl>
+
+      <dl className="mt-3 grid gap-3 md:grid-cols-4">
+        <Info
+          label="Issue size"
+          value={ipo.issueSizeShares === null
+            ? "Not published"
+            : `${ipo.issueSizeShares.toLocaleString("en-IN")} shares`}
+        />
+        <Info label="News sentiment" value={ipo.sentiment.label} />
+        <Info label="Evidence quality" value={ipo.sentiment.evidenceQuality} />
+        <Info
+          label="Article evidence"
+          value={`${ipo.sentiment.fullTextArticles} full text / ${ipo.sentiment.summaryArticles} summaries / ${ipo.sourceCount} sources`}
+        />
+      </dl>
+
+      <dl className="mt-3 grid gap-3 md:grid-cols-2">
+        <Info label="Expected listing profit" value={ipo.listingGainEstimate} />
+        <Info label="Risks" value={ipo.riskFlags.join(" ")} />
+      </dl>
+
+      {ipo.headlines.length > 0 ? (
+        <div className="mt-3 grid gap-2">
+          {ipo.headlines.map((headline) => (
+            <a
+              className="rounded-lg border border-slate-200 bg-white p-3 text-slate-700 hover:text-blue-700"
+              href={headline.link}
+              key={`${ipo.symbol}-${headline.link}`}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <span className="block text-xs font-semibold uppercase text-slate-500">
+                {headline.source} | {formatHeadlineTimestamp(headline.publishedAt)}
+              </span>
+              <span className="mt-1 block text-sm font-medium">{headline.title}</span>
+              <span className="mt-2 block text-xs font-semibold uppercase text-blue-700">
+                Analyzed: {headline.analysisDepth ?? "Headline only"}
+                {headline.analyzedWordCount ? ` | ${headline.analyzedWordCount} words` : ""}
+              </span>
+            </a>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950">
+          No recent independent article-level evidence matched this IPO. It remains
+          visible because NSE lists the issue, but the agent will not recommend an
+          application without supporting evidence.
+        </p>
+      )}
+    </article>
   );
 }
 
@@ -928,6 +1109,19 @@ function formatNewsWindow(generatedAt: string) {
   const start = new Date(end.getTime() - 72 * 60 * 60 * 1000);
 
   return `${start.toLocaleString()} to ${end.toLocaleString()}`;
+}
+
+function formatIssueWindow(start: string | null, end: string | null) {
+  const formatDate = (value: string | null) =>
+    value
+      ? new Date(`${value}T00:00:00`).toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      : "Not published";
+
+  return `${formatDate(start)} to ${formatDate(end)}`;
 }
 
 function formatNewsSummary(summary: string) {
