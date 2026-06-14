@@ -292,6 +292,7 @@ export default function Home() {
               key={view}
               onClick={() => setWorkspaceView(view)}
               type="button"
+              style={{ cursor: 'pointer' }}
             >
               {label}
             </button>
@@ -315,11 +316,13 @@ export default function Home() {
               className="cursor-pointer rounded-lg bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
               onClick={addSymbol}
               type="button"
+              style={{ cursor: 'pointer' }}
             >
               Add and scan
             </button>
             <button
               className="cursor-pointer rounded-lg border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700"
+              style={{ cursor: 'pointer' }}
               onClick={() => scanSymbols(symbols)}
               type="button"
             >
@@ -334,6 +337,7 @@ export default function Home() {
                 key={symbol}
                 onClick={() => removeSymbol(symbol)}
                 type="button"
+                style={{ cursor: 'pointer' }}
               >
                 {symbol} x
               </button>
