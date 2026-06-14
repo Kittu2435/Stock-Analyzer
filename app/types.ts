@@ -116,6 +116,7 @@ export type AgentPick = {
 };
 
 export type IndiaIpoCandidate = {
+  category: "Open now" | "Upcoming";
   companyName: string;
   symbol: string;
   series: string;
@@ -134,4 +135,27 @@ export type IndiaIpoCandidate = {
   sourceCount: number;
   sentiment: AgentPick["sentiment"];
   headlines: TrendHeadline[];
+  companyAnalysis: {
+    coverage: "Complete" | "Partial" | "Unavailable";
+    sections: string[];
+    documentStatus: string;
+    drhpUrl: string | null;
+    rhpUrl: string | null;
+    finalProspectusUrl: string | null;
+    abridgedProspectusUrl: string | null;
+    businessOverview: string | null;
+    issueObjects: string[];
+    financials: {
+      totalIncome: string | null;
+      profitAfterTax: string | null;
+      netWorth: string | null;
+      returnOnNetWorth: string | null;
+      basicEps: string | null;
+      profitable: boolean | null;
+    };
+    litigationSummary: string | null;
+    regulatorySummary: string | null;
+    positives: string[];
+    concerns: string[];
+  };
 };

@@ -5,7 +5,10 @@ import type {
   IndiaIpoCandidate,
   TrendHeadline,
 } from "../types";
-import { enrichHeadlineEvidence } from "./articleEvidence";
+import {
+  enrichHeadlineEvidence,
+  type ArticleEvidence,
+} from "./articleEvidence";
 import { analyzeNewsSentiment } from "./financialSentiment";
 import {
   fetchMarketHeadlines,
@@ -26,15 +29,51 @@ type NseIpoIssue = {
   symbol?: unknown;
 };
 
+type NseOfferDocument = {
+  company?: unknown;
+  drhpAttach?: unknown;
+  drhpStatus?: unknown;
+  fpAttach?: unknown;
+  ipo_abridged_prospectus_xbrl_link?: unknown;
+  pan_no?: unknown;
+  rhpAttach?: unknown;
+};
+
+type NormalizedIpoIssue = {
+  category: IndiaIpoCandidate["category"];
+  companyName: string;
+  issueEndDate: string | null;
+  issueSizeShares: number | null;
+  issueStartDate: string | null;
+  lotSize: number | null;
+  priceBand: string | null;
+  series: string;
+  status: string;
+  symbol: string;
+  upperPrice: number | null;
+};
+
+type CompanyAnalysis = IndiaIpoCandidate["companyAnalysis"];
+
 const nseIpoPage =
   "https://www.nseindia.com/market-data/all-upcoming-issues-ipo";
+const nseOfferDocumentsPage =
+  "https://www.nseindia.com/companies-listing/corporate-filings-offer-documents";
 const nseBaseUrl = "https://www.nseindia.com";
 const nseUserAgent =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36";
 
+const prospectusSections = [
+  { key: "BusinessOverviewAndStrategy140Response", label: "Business", type: "BOAS" },
+  { key: "ObjectsOfTheIssue170Response", label: "Issue objects", type: "OBJ_ISSUE" },
+  { key: "RestatedConsolidatedAudited210Response", label: "Audited financials", type: "RCA" },
+  { key: "Litigations220Response", label: "Litigation", type: "LITIGATION" },
+  { key: "RegulatoryAction240Response", label: "Regulatory actions", type: "REGULATORY" },
+] as const;
+
 export async function runIndiaIpoAgent(newsOverride?: IndiaNewsBatch) {
   const [ipoBatch, newsBatch] = await Promise.all([
-    fetchNseIpoIssues(),
+    fetchNseIpoData(),
     newsOverride ? Promise.resolve(newsOverride) : fetchMarketHeadlines(),
   ]);
   const matches = ipoBatch.issues.map((issue) => ({
@@ -48,6 +87,11 @@ export async function runIndiaIpoAgent(newsOverride?: IndiaNewsBatch) {
   const headlineByLink = new Map(
     enriched.headlines.map((headline) => [headline.link, headline]),
   );
+  const companyAnalysisBySymbol = await loadCompanyAnalyses(
+    ipoBatch.issues,
+    ipoBatch.offerDocuments,
+    ipoBatch.headers,
+  );
   const ipos = matches
     .map(({ issue, headlines }) =>
       buildIpoCandidate(
@@ -56,6 +100,7 @@ export async function runIndiaIpoAgent(newsOverride?: IndiaNewsBatch) {
           (headline) => headlineByLink.get(headline.link) ?? headline,
         ),
         enriched.evidenceByLink,
+        companyAnalysisBySymbol.get(issue.symbol) ?? emptyCompanyAnalysis(),
       ),
     )
     .sort(compareIpos);
@@ -63,7 +108,11 @@ export async function runIndiaIpoAgent(newsOverride?: IndiaNewsBatch) {
   return {
     generatedAt: new Date().toISOString(),
     ipos,
-    sources: ["NSE India IPO", ...newsBatch.sources],
+    sources: [
+      "NSE India IPO",
+      "NSE offer documents",
+      ...newsBatch.sources,
+    ],
     message:
       ipos.length > 0
         ? undefined
@@ -73,43 +122,41 @@ export async function runIndiaIpoAgent(newsOverride?: IndiaNewsBatch) {
   };
 }
 
-async function fetchNseIpoIssues() {
+async function fetchNseIpoData() {
   try {
     const landingResponse = await fetch(nseIpoPage, {
       cache: "no-store",
-      headers: {
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
-        "User-Agent": nseUserAgent,
-      },
+      headers: getLandingHeaders(),
     });
-    const cookies = getResponseCookies(landingResponse);
-    const headers = {
-      Accept: "application/json,text/plain,*/*",
-      "Accept-Language": "en-US,en;q=0.9",
-      Cookie: cookies,
-      Referer: nseIpoPage,
-      "User-Agent": nseUserAgent,
-    };
-    const [currentResponse, upcomingResponse] = await Promise.all([
-      fetch(`${nseBaseUrl}/api/ipo-current-issue`, {
-        cache: "no-store",
-        headers,
-      }),
-      fetch(`${nseBaseUrl}/api/all-upcoming-issues?category=ipo`, {
-        cache: "no-store",
-        headers,
-      }),
-    ]);
-    const current = currentResponse.ok
-      ? ((await currentResponse.json()) as unknown)
-      : [];
-    const upcoming = upcomingResponse.ok
-      ? ((await upcomingResponse.json()) as unknown)
-      : [];
-
-    const issues = [...parseIssueArray(current), ...parseIssueArray(upcoming)]
-      .map(normalizeIssue)
+    const headers = getNseApiHeaders(getResponseCookies(landingResponse));
+    const [currentResult, upcomingResult, equityDocsResult, smeDocsResult] =
+      await Promise.allSettled([
+        fetchJson(`${nseBaseUrl}/api/ipo-current-issue`, headers),
+        fetchJson(
+          `${nseBaseUrl}/api/all-upcoming-issues?category=ipo`,
+          headers,
+        ),
+        fetchJson(
+          `${nseBaseUrl}/api/corporates/offerdocs?index=equities`,
+          headers,
+        ),
+        fetchJson(
+          `${nseBaseUrl}/api/corporates/offerdocs?index=sme`,
+          headers,
+        ),
+      ]);
+    const current =
+      currentResult.status === "fulfilled" ? currentResult.value : [];
+    const upcoming =
+      upcomingResult.status === "fulfilled" ? upcomingResult.value : [];
+    const issues = [
+      ...parseIssueArray(current).map((issue) =>
+        normalizeIssue(issue, "Open now"),
+      ),
+      ...parseIssueArray(upcoming).map((issue) =>
+        normalizeIssue(issue, "Upcoming"),
+      ),
+    ]
       .filter((issue): issue is NormalizedIpoIssue => Boolean(issue))
       .filter(
         (issue, index, allIssues) =>
@@ -119,61 +166,162 @@ async function fetchNseIpoIssues() {
               candidate.issueStartDate === issue.issueStartDate,
           ) === index,
       );
+    const offerDocuments = [
+      ...(equityDocsResult.status === "fulfilled"
+        ? parseObjectArray(equityDocsResult.value)
+        : []),
+      ...(smeDocsResult.status === "fulfilled"
+        ? parseObjectArray(smeDocsResult.value)
+        : []),
+    ] as NseOfferDocument[];
 
     return {
-      available: currentResponse.ok || upcomingResponse.ok,
+      available:
+        currentResult.status === "fulfilled" ||
+        upcomingResult.status === "fulfilled",
+      headers,
       issues,
+      offerDocuments,
     };
   } catch (error) {
     console.error("Unable to load NSE IPO issues:", error);
     return {
       available: false,
+      headers: getNseApiHeaders(""),
       issues: [] as NormalizedIpoIssue[],
+      offerDocuments: [] as NseOfferDocument[],
     };
   }
 }
 
-type NormalizedIpoIssue = {
-  companyName: string;
-  issueEndDate: string | null;
-  issueSizeShares: number | null;
-  issueStartDate: string | null;
-  lotSize: number | null;
-  priceBand: string | null;
-  series: string;
-  status: string;
-  symbol: string;
-  upperPrice: number | null;
-};
+async function loadCompanyAnalyses(
+  issues: NormalizedIpoIssue[],
+  offerDocuments: NseOfferDocument[],
+  headers: Record<string, string>,
+) {
+  const entries = await Promise.all(
+    issues.slice(0, 10).map(async (issue) => {
+      const offerDocument = findOfferDocument(issue, offerDocuments);
+      const analysis = offerDocument
+        ? await fetchCompanyAnalysis(offerDocument, headers)
+        : emptyCompanyAnalysis();
 
-function normalizeIssue(issue: NseIpoIssue): NormalizedIpoIssue | null {
-  const companyName = getString(issue.companyName) || getString(issue.company);
-  const symbol = getString(issue.symbol).toUpperCase();
+      return [issue.symbol, analysis] as const;
+    }),
+  );
 
-  if (!companyName || !symbol) return null;
+  return new Map(entries);
+}
 
-  const priceBand =
-    getString(issue.priceBand) || getString(issue.issuePrice) || null;
-  const lotSize = getPositiveNumber(issue.lotSize);
+async function fetchCompanyAnalysis(
+  document: NseOfferDocument,
+  headers: Record<string, string>,
+): Promise<CompanyAnalysis> {
+  const pan = getString(document.pan_no);
+  const links = {
+    abridgedProspectusUrl: getDocumentUrl(
+      document.ipo_abridged_prospectus_xbrl_link,
+    ),
+    drhpUrl: getDocumentUrl(document.drhpAttach),
+    finalProspectusUrl: getDocumentUrl(document.fpAttach),
+    rhpUrl: getDocumentUrl(document.rhpAttach),
+  };
+
+  if (!pan) {
+    return {
+      ...emptyCompanyAnalysis(),
+      ...links,
+      coverage: Object.values(links).some(Boolean) ? "Partial" : "Unavailable",
+      documentStatus: getString(document.drhpStatus) || "Document listed",
+    };
+  }
+
+  const sectionResults = await Promise.allSettled(
+    prospectusSections.map(async (section) => {
+      const data = await fetchJson(
+        `${nseBaseUrl}/api/offer-documents-abridged-prospectus?pan_no=${encodeURIComponent(pan)}&type=${section.type}`,
+        headers,
+      );
+      return {
+        ...section,
+        rows: getResponseRows(data, section.key),
+      };
+    }),
+  );
+  const sections = sectionResults.flatMap((result) =>
+    result.status === "fulfilled" && result.value.rows.length > 0
+      ? [result.value]
+      : [],
+  );
+  const getRows = (type: string) =>
+    sections.find((section) => section.type === type)?.rows ?? [];
+  const business = getRows("BOAS")[0];
+  const financial = getRows("RCA")[0];
+  const objects = getRows("OBJ_ISSUE");
+  const litigation = getRows("LITIGATION");
+  const regulatory = getRows("REGULATORY")[0];
+  const profitable = getProfitability(financial);
+  const issueObjects = objects
+    .map((row) => displayValue(row.objectsOfTheIssue))
+    .filter((value): value is string => Boolean(value));
+  const litigationSummary = summarizeLitigation(litigation);
+  const regulatorySummary = summarizeRegulatory(regulatory);
+  const concerns = getCompanyConcerns(
+    profitable,
+    issueObjects,
+    litigationSummary,
+    regulatorySummary,
+  );
+  const positives = getCompanyPositives(
+    profitable,
+    financial,
+    links,
+    sections.map((section) => section.label),
+  );
+  const requiredSections = ["RCA", "OBJ_ISSUE", "LITIGATION", "REGULATORY"];
+  const hasRequiredSections = requiredSections.every((type) =>
+    sections.some((section) => section.type === type),
+  );
+  const hasFinalDocument = Boolean(
+    links.rhpUrl ||
+      links.finalProspectusUrl ||
+      links.abridgedProspectusUrl,
+  );
 
   return {
-    companyName,
-    symbol,
-    series: getString(issue.series) || "IPO",
-    status: getString(issue.status) || "Current",
-    issueStartDate: normalizeNseDate(issue.issueStartDate),
-    issueEndDate: normalizeNseDate(issue.issueEndDate),
-    priceBand,
-    issueSizeShares: getPositiveNumber(issue.issueSize),
-    lotSize,
-    upperPrice: getUpperPrice(priceBand),
+    coverage:
+      hasRequiredSections && hasFinalDocument
+        ? "Complete"
+        : sections.length > 0 || Object.values(links).some(Boolean)
+          ? "Partial"
+          : "Unavailable",
+    sections: sections.map((section) => section.label),
+    documentStatus: getString(document.drhpStatus) || "Document listed",
+    ...links,
+    businessOverview:
+      displayValue(business?.overviewOfTheCompany) ||
+      displayValue(business?.productOrServiceOfferingOfTheCompany),
+    issueObjects,
+    financials: {
+      totalIncome: displayValue(financial?.totalIncomeFromOperations),
+      profitAfterTax: displayValue(financial?.profAfterItemsAndTax),
+      netWorth: displayValue(financial?.netWorth),
+      returnOnNetWorth: displayValue(financial?.returnOnNetWorth),
+      basicEps: displayValue(financial?.basicLossPerShare),
+      profitable,
+    },
+    litigationSummary,
+    regulatorySummary,
+    positives,
+    concerns,
   };
 }
 
 function buildIpoCandidate(
   issue: NormalizedIpoIssue,
   headlines: TrendHeadline[],
-  evidenceByLink: Map<string, import("./articleEvidence").ArticleEvidence>,
+  evidenceByLink: Map<string, ArticleEvidence>,
+  companyAnalysis: CompanyAnalysis,
 ): IndiaIpoCandidate {
   const sentiment = analyzeNewsSentiment(
     headlines,
@@ -185,15 +333,15 @@ function buildIpoCandidate(
     issue.upperPrice && issue.lotSize
       ? issue.upperPrice * issue.lotSize
       : null;
-  const riskFlags = getRiskFlags(
+  const verdict = getIpoVerdict(
     issue,
     sentiment,
     sourceCount,
-    minimumInvestment,
+    companyAnalysis,
   );
-  const verdict = getIpoVerdict(issue, sentiment, sourceCount);
 
   return {
+    category: issue.category,
     companyName: issue.companyName,
     symbol: issue.symbol,
     series: issue.series,
@@ -205,14 +353,27 @@ function buildIpoCandidate(
     lotSize: issue.lotSize,
     minimumInvestment,
     verdict,
-    reason: getIpoReason(issue, sentiment, sourceCount, verdict),
+    reason: getIpoReason(
+      issue,
+      sentiment,
+      sourceCount,
+      verdict,
+      companyAnalysis,
+    ),
     listingGainEstimate:
-      "Not forecast. NSE issue terms and public news do not provide a reliable listing-price estimate.",
-    riskFlags,
-    sourceUrl: nseIpoPage,
+      "Not forecast. Official filings do not provide a reliable future listing price.",
+    riskFlags: getRiskFlags(
+      issue,
+      sentiment,
+      sourceCount,
+      minimumInvestment,
+      companyAnalysis,
+    ),
+    sourceUrl: nseOfferDocumentsPage,
     sourceCount,
     sentiment,
     headlines: sortHeadlinesNewestFirst(headlines).slice(0, 3),
+    companyAnalysis,
   };
 }
 
@@ -220,30 +381,27 @@ function getIpoVerdict(
   issue: NormalizedIpoIssue,
   sentiment: AgentPick["sentiment"],
   sourceCount: number,
+  analysis: CompanyAnalysis,
 ): IndiaIpoCandidate["verdict"] {
-  if (sentiment.label === "Negative") return "Avoid";
-
   if (
-    sentiment.evidenceQuality === "Weak" ||
-    sentiment.explicitEvidenceArticles === 0
+    sentiment.label === "Negative" ||
+    analysis.financials.profitable === false ||
+    analysis.concerns.some((concern) => concern.startsWith("Adverse regulatory"))
   ) {
-    return "Insufficient evidence";
+    return "Avoid";
   }
 
-  if (!isIssueOpen(issue.status)) return "Watch";
+  if (analysis.coverage !== "Complete") return "Insufficient evidence";
+  if (issue.category === "Upcoming") return "Watch";
 
   const isSme = issue.series.toUpperCase().includes("SME");
-
-  if (
-    sentiment.label === "Positive" &&
-    (isSme
-      ? sentiment.evidenceQuality === "Strong" && sourceCount >= 2
-      : sourceCount >= 1)
-  ) {
-    return "Consider applying";
+  if (isSme && (sourceCount < 1 || sentiment.explicitEvidenceArticles === 0)) {
+    return "Watch";
   }
 
-  return "Watch";
+  return analysis.financials.profitable === true
+    ? "Consider applying"
+    : "Watch";
 }
 
 function getRiskFlags(
@@ -251,29 +409,31 @@ function getRiskFlags(
   sentiment: AgentPick["sentiment"],
   sourceCount: number,
   minimumInvestment: number | null,
+  analysis: CompanyAnalysis,
 ) {
   const flags = [
-    "No listed price history exists before the IPO begins trading.",
+    "No listed price history exists before trading begins.",
     "Allotment and listing gains are not guaranteed.",
+    ...analysis.concerns,
   ];
 
   if (issue.series.toUpperCase().includes("SME")) {
-    flags.push("SME issue: liquidity, spread, and lot-size risk can be higher.");
+    flags.push("SME liquidity, spread, and lot-size risk can be higher.");
   }
-
   if (minimumInvestment !== null && minimumInvestment >= 100_000) {
-    flags.push("The minimum application amount creates concentrated exposure.");
+    flags.push("The minimum application creates concentrated exposure.");
   }
-
+  if (analysis.coverage !== "Complete") {
+    flags.push("Official company-analysis coverage is incomplete.");
+  }
   if (sentiment.evidenceQuality === "Weak") {
-    flags.push("Recent article-level financial evidence is insufficient.");
+    flags.push("Recent article-level evidence is limited.");
   }
-
   if (sourceCount < 2) {
     flags.push("Independent news-source confirmation is limited.");
   }
 
-  return flags;
+  return [...new Set(flags)];
 }
 
 function getIpoReason(
@@ -281,12 +441,125 @@ function getIpoReason(
   sentiment: AgentPick["sentiment"],
   sourceCount: number,
   verdict: IndiaIpoCandidate["verdict"],
+  analysis: CompanyAnalysis,
 ) {
-  return `${verdict}: NSE lists ${issue.companyName} as ${issue.status.toLowerCase()}. The agent found ${headlinesText(sentiment, sourceCount)}. IPOs do not have Zerodha price history before listing, so the verdict is based on official issue terms and article-level evidence only.`;
+  const timing =
+    issue.category === "Open now"
+      ? "The issue is currently open."
+      : "The issue is upcoming, so the final application decision should wait until it opens.";
+  const coverage =
+    analysis.coverage === "Complete"
+      ? `Official NSE prospectus coverage includes ${analysis.sections.join(", ")}.`
+      : `Official company coverage is ${analysis.coverage.toLowerCase()}; a DRHP alone is not treated as complete investment evidence.`;
+
+  return `${verdict}. ${timing} ${coverage} The company is ${analysis.financials.profitable === true ? "profitable in the latest structured filing" : analysis.financials.profitable === false ? "loss-making in the latest structured filing" : "missing usable structured profitability data"}. Recent coverage includes ${headlinesText(sentiment, sourceCount)}.`;
 }
 
-function headlinesText(sentiment: AgentPick["sentiment"], sourceCount: number) {
-  return `${sentiment.fullTextArticles} full-text report${sentiment.fullTextArticles === 1 ? "" : "s"}, ${sentiment.summaryArticles} summary report${sentiment.summaryArticles === 1 ? "" : "s"}, and ${sourceCount} independent news source${sourceCount === 1 ? "" : "s"}`;
+function getCompanyPositives(
+  profitable: boolean | null,
+  financial: Record<string, unknown> | undefined,
+  links: {
+    abridgedProspectusUrl: string | null;
+    drhpUrl: string | null;
+    finalProspectusUrl: string | null;
+    rhpUrl: string | null;
+  },
+  sections: string[],
+) {
+  const positives: string[] = [];
+
+  if (profitable === true) positives.push("Latest structured filing reports profit after tax.");
+  if ((getNumericValue(financial?.netWorth) ?? 0) > 0) {
+    positives.push("Latest structured filing reports positive net worth.");
+  }
+  if (links.rhpUrl || links.finalProspectusUrl || links.abridgedProspectusUrl) {
+    positives.push("A final or abridged official offer document is available.");
+  }
+  if (sections.length >= 4) {
+    positives.push("NSE provides broad structured company disclosure coverage.");
+  }
+
+  return positives;
+}
+
+function getCompanyConcerns(
+  profitable: boolean | null,
+  issueObjects: string[],
+  litigationSummary: string | null,
+  regulatorySummary: string | null,
+) {
+  const concerns: string[] = [];
+
+  if (profitable === false) {
+    concerns.push("Latest structured filing reports a loss after tax.");
+  }
+  if (
+    issueObjects.length > 0 &&
+    issueObjects.every((value) => /general corporate purposes/i.test(value))
+  ) {
+    concerns.push("The disclosed issue use is limited to general corporate purposes.");
+  }
+  if (litigationSummary && !isBenignDisclosure(litigationSummary)) {
+    concerns.push("The prospectus discloses litigation; review the amount and status.");
+  }
+  if (regulatorySummary && hasAdverseRegulatoryText(regulatorySummary)) {
+    concerns.push("Adverse regulatory or criminal disclosure requires review.");
+  }
+
+  return concerns;
+}
+
+function summarizeLitigation(rows: Record<string, unknown>[]) {
+  if (rows.length === 0) return null;
+
+  const amounts = rows
+    .map((row) => getNumericValue(row.aggregateAmountInvolved))
+    .filter((value): value is number => value !== null);
+  const descriptions = rows.flatMap((row) =>
+    [
+      ["Criminal proceedings", displayValue(row.criminalProceedings)],
+      ["Tax proceedings", displayValue(row.taxProceedings)],
+      [
+        "Statutory or regulatory proceedings",
+        displayValue(row.statutoryOrRegulatoryProceedings),
+      ],
+      [
+        "SEBI or exchange disciplinary actions",
+        displayValue(row.disciplinaryActionsByTheSEBI),
+      ],
+      ["Material civil litigation", displayValue(row.materialCivilLitigations)],
+    ].flatMap(([label, value]) => (value ? [`${label}: ${value}`] : [])),
+  );
+  const amountText =
+    amounts.length > 0
+      ? ` Aggregate amount values reported: ${amounts.join(", ")}.`
+      : "";
+
+  return `${[...new Set(descriptions)].join("; ")}${amountText}`.trim() || null;
+}
+
+function summarizeRegulatory(row: Record<string, unknown> | undefined) {
+  if (!row) return null;
+
+  return [
+    displayValue(row.disciplinaryActionTakenBySEBI),
+    displayValue(row.briefDetailsOfCriminalProceedings),
+    displayValue(row.anyOtherImpInfoAsPerBRLM),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .trim() || null;
+}
+
+function findOfferDocument(
+  issue: NormalizedIpoIssue,
+  documents: NseOfferDocument[],
+) {
+  const company = normalizeCompanyName(issue.companyName);
+
+  return documents.find(
+    (document) => normalizeCompanyName(getString(document.company)) === company,
+  );
 }
 
 function findIpoHeadlines(
@@ -309,25 +582,72 @@ function findIpoHeadlines(
   });
 }
 
-function compareIpos(
-  first: IndiaIpoCandidate,
-  second: IndiaIpoCandidate,
-) {
-  const verdictRank: Record<IndiaIpoCandidate["verdict"], number> = {
-    "Consider applying": 4,
-    Watch: 3,
-    "Insufficient evidence": 2,
-    Avoid: 1,
-  };
-  const verdictDifference =
-    verdictRank[second.verdict] - verdictRank[first.verdict];
+function normalizeIssue(
+  issue: NseIpoIssue,
+  category: IndiaIpoCandidate["category"],
+): NormalizedIpoIssue | null {
+  const companyName = getString(issue.companyName) || getString(issue.company);
+  const symbol = getString(issue.symbol).toUpperCase();
 
-  if (verdictDifference !== 0) return verdictDifference;
+  if (!companyName || !symbol) return null;
+
+  const priceBand =
+    getString(issue.priceBand) || getString(issue.issuePrice) || null;
+
+  return {
+    category,
+    companyName,
+    symbol,
+    series: getString(issue.series) || "IPO",
+    status: getString(issue.status) || category,
+    issueStartDate: normalizeNseDate(issue.issueStartDate),
+    issueEndDate: normalizeNseDate(issue.issueEndDate),
+    priceBand,
+    issueSizeShares: getPositiveNumber(issue.issueSize),
+    lotSize: getPositiveNumber(issue.lotSize),
+    upperPrice: getUpperPrice(priceBand),
+  };
+}
+
+function emptyCompanyAnalysis(): CompanyAnalysis {
+  return {
+    coverage: "Unavailable",
+    sections: [],
+    documentStatus: "No matched official offer document",
+    drhpUrl: null,
+    rhpUrl: null,
+    finalProspectusUrl: null,
+    abridgedProspectusUrl: null,
+    businessOverview: null,
+    issueObjects: [],
+    financials: {
+      totalIncome: null,
+      profitAfterTax: null,
+      netWorth: null,
+      returnOnNetWorth: null,
+      basicEps: null,
+      profitable: null,
+    },
+    litigationSummary: null,
+    regulatorySummary: null,
+    positives: [],
+    concerns: [],
+  };
+}
+
+function compareIpos(first: IndiaIpoCandidate, second: IndiaIpoCandidate) {
+  if (first.category !== second.category) {
+    return first.category === "Open now" ? -1 : 1;
+  }
 
   return (
     new Date(first.issueStartDate ?? "9999-12-31").getTime() -
     new Date(second.issueStartDate ?? "9999-12-31").getTime()
   );
+}
+
+function headlinesText(sentiment: AgentPick["sentiment"], sourceCount: number) {
+  return `${sentiment.fullTextArticles} full-text report${sentiment.fullTextArticles === 1 ? "" : "s"}, ${sentiment.summaryArticles} summary report${sentiment.summaryArticles === 1 ? "" : "s"}, and ${sourceCount} independent news source${sourceCount === 1 ? "" : "s"}`;
 }
 
 function sortHeadlinesNewestFirst(headlines: TrendHeadline[]) {
@@ -338,13 +658,109 @@ function sortHeadlinesNewestFirst(headlines: TrendHeadline[]) {
   );
 }
 
-function isIssueOpen(status: string) {
-  return /\b(open|active|current)\b/i.test(status);
+async function fetchJson(url: string, headers: Record<string, string>) {
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(`NSE request failed (${response.status})`);
+  }
+
+  return response.json() as Promise<unknown>;
+}
+
+function getLandingHeaders() {
+  return {
+    Accept: "text/html,application/xhtml+xml",
+    "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent": nseUserAgent,
+  };
+}
+
+function getNseApiHeaders(cookies: string) {
+  return {
+    Accept: "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    Cookie: cookies,
+    Referer: nseOfferDocumentsPage,
+    "User-Agent": nseUserAgent,
+  };
+}
+
+function getResponseRows(value: unknown, key: string) {
+  if (!value || typeof value !== "object") return [];
+  const rows = (value as Record<string, unknown>)[key];
+  return parseObjectArray(rows);
+}
+
+function parseIssueArray(value: unknown): NseIpoIssue[] {
+  if (Array.isArray(value)) return value as NseIpoIssue[];
+  if (!value || typeof value !== "object") return [];
+
+  const object = value as Record<string, unknown>;
+  const candidates = [
+    object.data,
+    object.currentIssueDetails,
+    object.issueDetails,
+    object.forthcomingIssueDetails,
+  ];
+
+  return (candidates.find(Array.isArray) as NseIpoIssue[] | undefined) ?? [];
+}
+
+function parseObjectArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object",
+      )
+    : [];
+}
+
+function getProfitability(financial: Record<string, unknown> | undefined) {
+  const profit = getNumericValue(financial?.profAfterItemsAndTax);
+  return profit === null ? null : profit > 0;
+}
+
+function getNumericValue(value: unknown) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const numeric = Number(value.replace(/,/g, "").replace(/%/g, "").trim());
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function displayValue(value: unknown) {
+  const text = getString(value);
+  return text && !/^(?:-|n\.?a\.?|not applicable|null)$/i.test(text)
+    ? text
+    : null;
+}
+
+function getDocumentUrl(value: unknown) {
+  const url = displayValue(value);
+  return url && /^https?:\/\//i.test(url) ? url : null;
+}
+
+function isBenignDisclosure(value: string) {
+  return !/\b(?:criminal|disciplinary|material civil|regulatory proceedings|tax proceedings)\b/i.test(
+    value.replace(/\b(?:n\.?a\.?|nil|none|not applicable|no)\b/gi, ""),
+  );
+}
+
+function hasAdverseRegulatoryText(value: string) {
+  const remaining = value
+    .replace(/\bthere has been no disciplinary action\b/gi, "")
+    .replace(/\b(?:n\.?a\.?|nil|none|not applicable)\b/gi, "");
+
+  return /\b(?:disciplinary action|criminal proceedings|penalty|fraud|default|debarred)\b/i.test(
+    remaining,
+  );
 }
 
 function getUpperPrice(priceBand: string | null) {
   if (!priceBand) return null;
-
   const values = priceBand.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
   return values.length > 0 ? Math.max(...values) : null;
 }
@@ -392,21 +808,6 @@ function getResponseCookies(response: Response) {
     .join("; ");
 }
 
-function parseIssueArray(value: unknown): NseIpoIssue[] {
-  if (Array.isArray(value)) return value as NseIpoIssue[];
-  if (!value || typeof value !== "object") return [];
-
-  const object = value as Record<string, unknown>;
-  const candidates = [
-    object.data,
-    object.currentIssueDetails,
-    object.issueDetails,
-    object.forthcomingIssueDetails,
-  ];
-
-  return candidates.find(Array.isArray) as NseIpoIssue[] | undefined ?? [];
-}
-
 function getString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -423,10 +824,13 @@ function getPositiveNumber(value: unknown) {
 }
 
 function normalizeCompanyName(value: string) {
-  return normalizeText(value).replace(
-    /\b(LIMITED|LTD|PRIVATE|PVT|INDIA|INDUSTRIES|COMPANY|CORPORATION)\b/g,
-    " ",
-  ).replace(/\s+/g, " ").trim();
+  return normalizeText(value)
+    .replace(
+      /\b(LIMITED|LTD|PRIVATE|PVT|INDIA|INDUSTRIES|COMPANY|CORPORATION)\b/g,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizeText(value: string) {
