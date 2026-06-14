@@ -114,3 +114,61 @@ export type AgentPick = {
   signal: TradeSignal;
   headlines: TrendHeadline[];
 };
+
+export type IndiaIpoCandidate = {
+  category: "Open now" | "Upcoming";
+  companyName: string;
+  symbol: string;
+  series: string;
+  status: string;
+  issueStartDate: string | null;
+  issueEndDate: string | null;
+  priceBand: string | null;
+  issueSizeShares: number | null;
+  lotSize: number | null;
+  minimumInvestment: number | null;
+  verdict: "Consider applying" | "Watch" | "Avoid" | "Insufficient evidence";
+  reason: string;
+  listingGainEstimate: string;
+  riskFlags: string[];
+  sourceUrl: string;
+  sourceCount: number;
+  sentiment: AgentPick["sentiment"];
+  headlines: TrendHeadline[];
+  assessment: {
+    decision: "Apply" | "Wait" | "Do not apply";
+    passedRequiredChecks: number;
+    totalRequiredChecks: number;
+    blockingReasons: string[];
+    metrics: {
+      label: string;
+      status: "Pass" | "Concern" | "Missing" | "Pending" | "Information";
+      value: string;
+      consideration: string;
+      required: boolean;
+    }[];
+  };
+  companyAnalysis: {
+    coverage: "Complete" | "Partial" | "Unavailable";
+    sections: string[];
+    documentStatus: string;
+    drhpUrl: string | null;
+    rhpUrl: string | null;
+    finalProspectusUrl: string | null;
+    abridgedProspectusUrl: string | null;
+    businessOverview: string | null;
+    issueObjects: string[];
+    financials: {
+      totalIncome: string | null;
+      profitAfterTax: string | null;
+      netWorth: string | null;
+      returnOnNetWorth: string | null;
+      basicEps: string | null;
+      profitable: boolean | null;
+    };
+    litigationSummary: string | null;
+    regulatorySummary: string | null;
+    positives: string[];
+    concerns: string[];
+  };
+};

@@ -31,7 +31,7 @@ type SymbolMention = {
   strongestMatch: number;
 };
 
-type NewsBatch = {
+export type IndiaNewsBatch = {
   headlines: TrendHeadline[];
   sources: string[];
 };
@@ -209,7 +209,7 @@ export async function runMarketTrendAgent(accessToken: string) {
   };
 }
 
-async function fetchMarketHeadlines(): Promise<NewsBatch> {
+export async function fetchMarketHeadlines(): Promise<IndiaNewsBatch> {
   const responses = await Promise.allSettled(
     rssSources.map(async (source) => {
       const response = await fetch(source.url, {

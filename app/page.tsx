@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { IpoWorkspace } from "./components/IpoWorkspace";
 import { normalizeNseSymbol } from "./lib/nseSymbols";
-import type { AgentPick, TradeSignal, TrendHeadline } from "./types";
+import type {
+  AgentPick,
+  IndiaIpoCandidate,
+  TradeSignal,
+  TrendHeadline,
+} from "./types";
 
 type SignalResponse = {
   generatedAt: string;
@@ -29,9 +35,18 @@ type AgentResponse = {
   latestNews?: TrendHeadline[];
 };
 
+type IpoResponse = {
+  generatedAt: string;
+  ipos: IndiaIpoCandidate[];
+  message?: string;
+  sources: string[];
+};
+
 type AgentMarket = "INDIA" | "US";
+type WorkspaceView = "stocks" | "ipos";
 
 export default function Home() {
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("stocks");
   const [symbolInput, setSymbolInput] = useState("");
   const [symbols, setSymbols] = useState<string[]>([]);
   const [signals, setSignals] = useState<TradeSignal[]>([]);
@@ -48,7 +63,13 @@ export default function Home() {
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentMarket, setAgentMarket] = useState<AgentMarket>("INDIA");
   const [latestMarketNews, setLatestMarketNews] = useState<TrendHeadline[]>([]);
+  const [ipoCandidates, setIpoCandidates] = useState<IndiaIpoCandidate[]>([]);
+  const [ipoMessage, setIpoMessage] = useState<string | undefined>();
+  const [ipoSources, setIpoSources] = useState<string[]>([]);
+  const [ipoGeneratedAt, setIpoGeneratedAt] = useState<string | undefined>();
+  const [isIpoLoading, setIsIpoLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [ipoAutoRefresh, setIpoAutoRefresh] = useState(true);
 
   const actionableCount = useMemo(
     () => signals.filter((signal) => signal.decision === "Actionable").length,
@@ -106,12 +127,14 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (workspaceView !== "stocks") return;
+
     const timer = window.setTimeout(() => {
       scanSymbols(symbols);
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [scanSymbols, symbols]);
+  }, [scanSymbols, symbols, workspaceView]);
 
   function addSymbol() {
     const symbol = normalizeNseSymbol(symbolInput);
@@ -155,9 +178,29 @@ export default function Home() {
     }
   }, [agentMarket]);
 
+  const runIpoAgent = useCallback(async () => {
+    setIsIpoLoading(true);
+
+    try {
+      const data = await fetchJsonWithRetry<IpoResponse>("/api/agent/ipos", 1);
+      setIpoCandidates(data.ipos);
+      setIpoMessage(data.message);
+      setIpoSources(data.sources);
+      setIpoGeneratedAt(data.generatedAt);
+    } catch (requestError) {
+      setIpoCandidates([]);
+      setIpoMessage(
+        requestError instanceof Error
+          ? requestError.message
+          : "IPO sources are temporarily unavailable.",
+      );
+    } finally {
+      setIsIpoLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!autoRefresh) return;
-    if (agentMarket === "INDIA" && !status?.connected) return;
+    if (!autoRefresh || workspaceView !== "stocks") return;
 
     const initialTimer = window.setTimeout(runTrendAgent, 500);
     const interval = window.setInterval(() => {
@@ -170,7 +213,23 @@ export default function Home() {
       window.clearTimeout(initialTimer);
       window.clearInterval(interval);
     };
-  }, [agentMarket, autoRefresh, runTrendAgent, status?.connected]);
+  }, [agentMarket, autoRefresh, runTrendAgent, workspaceView]);
+
+  useEffect(() => {
+    if (!ipoAutoRefresh || workspaceView !== "ipos") return;
+
+    const initialTimer = window.setTimeout(runIpoAgent, 200);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        runIpoAgent();
+      }
+    }, 5 * 60 * 1000);
+
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(interval);
+    };
+  }, [ipoAutoRefresh, runIpoAgent, workspaceView]);
 
   function addDiscoveredSymbol(symbol: string) {
     setSymbols((currentSymbols) =>
@@ -183,21 +242,30 @@ export default function Home() {
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-5 py-6 sm:px-8 lg:px-10">
         <header className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm font-semibold uppercase text-blue-700">
-            Zerodha India scanner
+            Stock Analyzer
           </p>
           <div className="mt-2 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h1 className="text-4xl font-semibold tracking-tight">
-                Entry, exit, hold, intraday, and F&O filter
+                {workspaceView === "stocks"
+                  ? "Stocks and trade scenarios"
+                  : "Indian IPO research"}
               </h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-                Uses current news, historical trend, and live quote checks.
-                Research only, with no automatic order placement.
+                {workspaceView === "stocks"
+                  ? "Current news, historical trend, and live quote checks for Indian and US stocks."
+                  : "Current and upcoming issues checked against official company filings and recent credible coverage."}
               </p>
             </div>
             <div className="max-w-md text-left lg:text-right">
-              <StatusPill status={status} />
-              {status?.message ? (
+              {workspaceView === "stocks" ? (
+                <StatusPill status={status} />
+              ) : (
+                <span className="rounded-lg bg-emerald-700 px-4 py-3 text-sm font-semibold text-white">
+                  Official NSE sources
+                </span>
+              )}
+              {workspaceView === "stocks" && status?.message ? (
                 <p className="mt-2 text-xs leading-5 text-slate-500">
                   {status.message}
                 </p>
@@ -206,6 +274,33 @@ export default function Home() {
           </div>
         </header>
 
+        <nav
+          aria-label="Research workspace"
+          className="flex border-b border-slate-300"
+        >
+          {([
+            ["stocks", "Stocks"],
+            ["ipos", "IPOs"],
+          ] as [WorkspaceView, string][]).map(([view, label]) => (
+            <button
+              aria-current={workspaceView === view ? "page" : undefined}
+              className={`min-h-11 border-b-2 px-5 text-sm font-semibold ${
+                workspaceView === view
+                  ? "border-blue-700 text-blue-700"
+                  : "border-transparent text-slate-500 hover:text-slate-950"
+              }`}
+              key={view}
+              onClick={() => setWorkspaceView(view)}
+              type="button"
+              style={{ cursor: 'pointer' }}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        {workspaceView === "stocks" ? (
+          <>
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-3 md:flex-row">
             <input
@@ -221,11 +316,13 @@ export default function Home() {
               className="cursor-pointer rounded-lg bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
               onClick={addSymbol}
               type="button"
+              style={{ cursor: 'pointer' }}
             >
               Add and scan
             </button>
             <button
               className="cursor-pointer rounded-lg border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700"
+              style={{ cursor: 'pointer' }}
               onClick={() => scanSymbols(symbols)}
               type="button"
             >
@@ -240,6 +337,7 @@ export default function Home() {
                 key={symbol}
                 onClick={() => removeSymbol(symbol)}
                 type="button"
+                style={{ cursor: 'pointer' }}
               >
                 {symbol} x
               </button>
@@ -409,6 +507,19 @@ export default function Home() {
             <SignalCard key={signal.symbol} signal={signal} />
           ))}
         </section>
+          </>
+        ) : (
+          <IpoWorkspace
+            autoRefresh={ipoAutoRefresh}
+            generatedAt={ipoGeneratedAt}
+            ipos={ipoCandidates}
+            isLoading={isIpoLoading}
+            message={ipoMessage}
+            onAutoRefreshChange={setIpoAutoRefresh}
+            onRefresh={runIpoAgent}
+            sources={ipoSources}
+          />
+        )}
       </section>
     </main>
   );
