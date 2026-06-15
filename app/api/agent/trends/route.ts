@@ -11,6 +11,10 @@ import { getServerConfig } from "../../../lib/serverConfig";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const routeHeaders = {
+  "X-Stock-Analyzer-Endpoint": "trend-agent",
+};
+
 export async function GET(request: NextRequest) {
   try {
     const market = request.nextUrl.searchParams.get("market")?.toUpperCase();
@@ -18,8 +22,8 @@ export async function GET(request: NextRequest) {
     if (market === "US") {
       return NextResponse.json(await runUsTrendAgent(), {
         headers: {
-          "Cache-Control":
-            "public, s-maxage=300, stale-while-revalidate=60",
+          ...routeHeaders,
+          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60",
         },
       });
     }
@@ -31,16 +35,19 @@ export async function GET(request: NextRequest) {
     const { KITE_API_KEY: apiKey } = await getServerConfig();
 
     if (!accessToken || !apiKey) {
-      return NextResponse.json({
-        generatedAt: new Date().toISOString(),
-        picks: [],
-        sources: [],
-        message: "Connect Zerodha to rank trend-backed Indian stocks.",
-      });
+      return NextResponse.json(
+        {
+          generatedAt: new Date().toISOString(),
+          picks: [],
+          sources: [],
+          message: "Connect Zerodha to rank trend-backed Indian stocks.",
+        },
+        { headers: routeHeaders },
+      );
     }
 
     const result = await runMarketTrendAgent(accessToken);
-    const response = NextResponse.json(result);
+    const response = NextResponse.json(result, { headers: routeHeaders });
 
     if ("reconnectRequired" in result && result.reconnectRequired) {
       response.cookies.delete(kiteCookieName);
@@ -63,7 +70,7 @@ export async function GET(request: NextRequest) {
           "Trend sources are temporarily unavailable. The next automatic refresh will retry.",
         diagnostic,
       },
-      { status: 503 },
+      { status: 503, headers: routeHeaders },
     );
   }
 }

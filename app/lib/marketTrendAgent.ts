@@ -136,16 +136,29 @@ export async function runMarketTrendAgent(accessToken: string) {
         signal: NonNullable<typeof candidate>["signal"];
       } => Boolean(candidate),
     )
-    .slice(0, 8);
-  const enrichedEvidence = await enrichHeadlineEvidence(
-    candidates.flatMap((candidate) => candidate.mention.headlines),
-  );
+    .slice(0, 6);
+  const [enrichedEvidence, historyEntries] = await Promise.all([
+    enrichHeadlineEvidence(
+      candidates.flatMap((candidate) => candidate.mention.headlines),
+      8,
+    ),
+    mapWithConcurrency(candidates, 3, async ({ mention }) => {
+      try {
+        return await loadHistoricalAnalysis(
+          mention.instrument.instrumentToken,
+          accessToken,
+        );
+      } catch {
+        return unavailableHistory("Historical data request failed.");
+      }
+    }),
+  ]);
   const enrichedHeadlineByLink = new Map(
     enrichedEvidence.headlines.map((headline) => [headline.link, headline]),
   );
   const picks: AgentPick[] = [];
 
-  for (const candidate of candidates) {
+  for (const [candidateIndex, candidate] of candidates.entries()) {
     const { mention, signal } = candidate;
     const analyzedHeadlines = mention.headlines.map(
       (headline) => enrichedHeadlineByLink.get(headline.link) ?? headline,
@@ -156,10 +169,7 @@ export async function runMarketTrendAgent(accessToken: string) {
       enrichedEvidence.evidenceByLink,
       [mention.instrument.tradingsymbol, mention.instrument.name],
     );
-    const history = await loadHistoricalAnalysis(
-      mention.instrument.instrumentToken,
-      accessToken,
-    );
+    const history = historyEntries[candidateIndex];
     const verdict = getAgentVerdict(sentiment, history, signal.decision);
     const strategy = recommendStrategy({
       verdict,
@@ -188,8 +198,6 @@ export async function runMarketTrendAgent(accessToken: string) {
       signal,
       headlines: sortHeadlinesNewestFirst(analyzedHeadlines).slice(0, 3),
     });
-
-    await wait(350);
   }
 
   picks.sort(compareAgentPicks);
@@ -217,6 +225,7 @@ export async function fetchMarketHeadlines(): Promise<IndiaNewsBatch> {
         headers: {
           Accept: "application/rss+xml, application/xml, text/xml, text/html",
         },
+        signal: AbortSignal.timeout(8_000),
       });
 
       if (!response.ok) {
@@ -663,6 +672,28 @@ function formatDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-function wait(milliseconds: number) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex]);
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(Math.max(1, concurrency), items.length) },
+      () => runWorker(),
+    ),
+  );
+
+  return results;
 }

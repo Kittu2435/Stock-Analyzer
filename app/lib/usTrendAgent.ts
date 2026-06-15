@@ -120,7 +120,7 @@ export async function runUsTrendAgent() {
     newsResult.news,
     rssBatch.headlines,
     secCompanies,
-  ).slice(0, 12);
+  ).slice(0, 8);
   const latestNews = buildLatestMarketNews(newsResult.news, rssBatch.headlines);
   const sources = [
     ...rssBatch.sources,
@@ -138,34 +138,52 @@ export async function runUsTrendAgent() {
     };
   }
 
-  const validationResults = await Promise.allSettled(
-    mentions.map(async (mention) => {
-      const [quote, companyNews, profile] = await Promise.all([
+  const validationResults = await mapWithConcurrency(
+    mentions,
+    3,
+    async (mention) => {
+      const [quote, profile] = await Promise.all([
         fetchFinnhubQuote(mention.symbol, apiKey),
-        fetchFinnhubCompanyNews(mention.company, apiKey),
         fetchFinnhubProfile(mention.symbol, apiKey),
       ]);
 
+      if (
+        !isValidFinnhubQuote(quote)
+      ) {
+        return {
+          status: "quote-unavailable" as const,
+          symbol: mention.symbol,
+        };
+      }
+
+      if (!isCompatibleFinnhubProfile(profile, mention.symbol)) {
+        return {
+          status: "profile-mismatch" as const,
+          symbol: mention.symbol,
+        };
+      }
+
+      const companyNews = await fetchFinnhubCompanyNews(mention.company, apiKey);
+
       return {
+        status: "validated" as const,
         mention: {
           ...mention,
           headlines: mergeHeadlines(mention.headlines, companyNews),
         },
         quote,
-        profile,
       };
-    }),
+    },
   );
   const quotes: Record<string, KiteQuote> = {};
   const validatedMentions: UsMention[] = [];
 
   for (const result of validationResults) {
-    if (result.status !== "fulfilled" || !result.value) continue;
+    if (!result || result.status !== "validated") continue;
 
-    const { mention, profile, quote } = result.value;
+    const { mention, quote } = result;
 
     if (
-      !isValidFinnhubProfile(profile, mention.symbol) ||
       !isValidFinnhubQuote(quote) ||
       mention.headlines.length === 0
     ) {
@@ -250,9 +268,26 @@ export async function runUsTrendAgent() {
     message:
       picks.length > 0
         ? undefined
-        : "News was found, but no current Finnhub quote was available for the matched US symbols.",
+        : "Latest US market news is available below. Trade levels appear only after a current quote is verified.",
     sources: [...sources, "Finnhub Company News", "Finnhub Quotes"],
     latestNews,
+    diagnostic:
+      process.env.NODE_ENV === "development"
+        ? {
+            candidates: mentions.map((mention) => mention.symbol),
+            validation: validationResults.map((result) =>
+              result
+                ? {
+                    status: result.status,
+                    symbol:
+                      result.status === "validated"
+                        ? result.mention.symbol
+                        : result.symbol,
+                  }
+                : { status: "request-failed", symbol: null },
+            ),
+          }
+        : undefined,
   };
 }
 
@@ -260,7 +295,7 @@ async function fetchFinnhubNews(apiKey: string) {
   try {
     const response = await fetch(
       `https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(apiKey)}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal: AbortSignal.timeout(8_000) },
     );
 
     if (!response.ok) return { news: [], available: false };
@@ -278,7 +313,7 @@ async function fetchFinnhubQuote(symbol: string, apiKey: string) {
   try {
     const response = await fetch(
       `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${encodeURIComponent(apiKey)}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal: AbortSignal.timeout(8_000) },
     );
 
     if (!response.ok) return null;
@@ -293,7 +328,7 @@ async function fetchFinnhubProfile(symbol: string, apiKey: string) {
   try {
     const response = await fetch(
       `https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(symbol)}&token=${encodeURIComponent(apiKey)}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal: AbortSignal.timeout(8_000) },
     );
 
     if (!response.ok) return null;
@@ -315,7 +350,7 @@ async function fetchFinnhubCompanyNews(
   try {
     const response = await fetch(
       `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(company.ticker)}&from=${formatDate(from)}&to=${formatDate(to)}&token=${encodeURIComponent(apiKey)}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal: AbortSignal.timeout(8_000) },
     );
 
     if (!response.ok) return [];
@@ -359,6 +394,7 @@ async function fetchUsRssHeadlines(): Promise<RssBatch> {
         headers: {
           Accept: "application/rss+xml, application/xml, text/xml, text/html",
         },
+        signal: AbortSignal.timeout(8_000),
       });
 
       if (!response.ok) return { headlines: [], source: null };
@@ -391,6 +427,7 @@ async function fetchSecCompanies(): Promise<SecCompany[]> {
           Accept: "application/json",
           "User-Agent": "StockAnalyzer research app",
         },
+        signal: AbortSignal.timeout(8_000),
       },
     );
 
@@ -433,8 +470,13 @@ function buildUsMentions(
       publishedAt,
       summary: htmlToPlainText(item.summary) || null,
     };
+    const relatedSymbols = parseRelatedSymbols(item.related);
+
     for (const company of secCompanies) {
-      if (companyMatchesHeadline(company, item.headline)) {
+      if (
+        relatedSymbols.has(company.ticker) ||
+        companyMatchesHeadline(company, item.headline)
+      ) {
         addMention(mentions, company, {
           ...headline,
           title: decodeXml(headline.title),
@@ -624,15 +666,24 @@ function isValidFinnhubQuote(
   );
 }
 
-function isValidFinnhubProfile(
+function isCompatibleFinnhubProfile(
   profile: FinnhubProfile | null,
   symbol: string,
 ) {
-  return Boolean(
-    profile?.name &&
-      profile.ticker?.toUpperCase() === symbol &&
-      profile.currency?.toUpperCase() === "USD" &&
-      profile.exchange,
+  if (!profile?.ticker) return true;
+
+  return (
+    profile.ticker.toUpperCase() === symbol &&
+    (!profile.currency || profile.currency.toUpperCase() === "USD")
+  );
+}
+
+function parseRelatedSymbols(value: string | undefined) {
+  return new Set(
+    (value ?? "")
+      .split(",")
+      .map((symbol) => symbol.trim().toUpperCase())
+      .filter((symbol) => /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)),
   );
 }
 
@@ -749,4 +800,35 @@ function decodeXml(value: string) {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+
+      try {
+        results[currentIndex] = await worker(items[currentIndex]);
+      } catch {
+        results[currentIndex] = null as R;
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(Math.max(1, concurrency), items.length) },
+      () => runWorker(),
+    ),
+  );
+
+  return results;
 }

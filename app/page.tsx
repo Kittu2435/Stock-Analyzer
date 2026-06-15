@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { IpoWorkspace } from "./components/IpoWorkspace";
+import { TradeOrderModal } from "./components/TradeOrderModal";
 import { normalizeNseSymbol } from "./lib/nseSymbols";
 import type {
   AgentPick,
@@ -168,10 +169,9 @@ export default function Home() {
       setAgentGeneratedAt(data.generatedAt);
       setLatestMarketNews(data.latestNews ?? []);
     } catch (requestError) {
+      console.error("Trend agent refresh failed:", requestError);
       setAgentError(
-        requestError instanceof Error
-          ? requestError.message
-          : "Trend agent could not load current sources.",
+        "We couldn't refresh the latest market analysis. Please retry in a moment; automatic refresh will keep trying in the background.",
       );
     } finally {
       setIsAgentLoading(false);
@@ -440,7 +440,21 @@ export default function Home() {
           ) : null}
 
           {agentError ? (
-            <StateCard title="Agent failed" body={agentError} tone="red" />
+            <StateCard
+              action={
+                <button
+                  className="min-h-10 rounded-lg bg-amber-950 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isAgentLoading}
+                  onClick={runTrendAgent}
+                  type="button"
+                >
+                  {isAgentLoading ? "Retrying..." : "Retry scan"}
+                </button>
+              }
+              body={agentError}
+              title="Market scan unavailable"
+              tone="amber"
+            />
           ) : null}
 
           {!agentError && agentMessage ? (
@@ -454,8 +468,8 @@ export default function Home() {
                 <Badge>Newest first</Badge>
               </div>
               <p className="mt-1 text-sm text-slate-600">
-                News-only companies appear here when Finnhub has not yet
-                provided a verified tradable US ticker and quote.
+                Current reporting remains visible even when a verified quote is
+                unavailable. Trade levels are never estimated without one.
               </p>
               <div className="mt-3 grid gap-2">
                 {latestMarketNews.map((headline) => (
@@ -551,13 +565,20 @@ function AgentPickCard({
           <p className="mt-2 text-sm leading-6 text-slate-600">{pick.reason}</p>
         </div>
         {onAdd ? (
-          <button
-            className="cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-            onClick={() => onAdd(pick.symbol)}
-            type="button"
-          >
-            Add to scan
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+              onClick={() => onAdd(pick.symbol)}
+              type="button"
+            >
+              Add to scan
+            </button>
+            <TradeOrderModal
+              signal={pick.signal}
+              sourceStrategy={pick.strategy.type}
+              sourceVerdict={pick.verdict}
+            />
+          </div>
         ) : null}
       </div>
 
@@ -728,9 +749,18 @@ function SignalCard({ signal }: { signal: TradeSignal }) {
           </div>
           <p className="mt-3 text-sm leading-6 text-slate-600">{signal.reason}</p>
         </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <p className="text-xs font-medium uppercase text-slate-500">Confidence</p>
-          <p className="mt-1 text-3xl font-semibold">{signal.confidence}%</p>
+        <div className="flex flex-col items-stretch gap-2">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-medium uppercase text-slate-500">
+              Confidence
+            </p>
+            <p className="mt-1 text-3xl font-semibold">{signal.confidence}%</p>
+          </div>
+          <TradeOrderModal
+            signal={signal}
+            sourceStrategy={signal.tradeType}
+            sourceVerdict={signal.decision}
+          />
         </div>
       </div>
 
@@ -863,10 +893,12 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 function StateCard({
+  action,
   body,
   title,
   tone = "slate",
 }: {
+  action?: ReactNode;
   body: string;
   title: string;
   tone?: "amber" | "red" | "slate";
@@ -881,6 +913,7 @@ function StateCard({
     <section className={`rounded-lg border p-5 shadow-sm ${toneClass}`}>
       <h2 className="text-lg font-semibold">{title}</h2>
       <p className="mt-2 text-sm leading-6">{body}</p>
+      {action ? <div className="mt-4">{action}</div> : null}
     </section>
   );
 }
@@ -1056,10 +1089,30 @@ async function fetchJsonWithRetry<T>(url: string, retries = 1): Promise<T> {
         cache: "no-store",
         credentials: "same-origin",
       });
-      const data = (await response.json()) as T & {
+      const responseBody = await response.text();
+      let data: (T & {
         diagnostic?: string;
         message?: string;
-      };
+      }) | null = null;
+
+      try {
+        data = responseBody
+          ? (JSON.parse(responseBody) as T & {
+              diagnostic?: string;
+              message?: string;
+            })
+          : null;
+      } catch {
+        throw new Error(getUnreadableApiResponseMessage(response.status));
+      }
+
+      if (!data) {
+        throw new Error(
+          response.ok
+            ? "The server returned an empty response."
+            : getUnreadableApiResponseMessage(response.status),
+        );
+      }
 
       if (!response.ok) {
         const detail =
@@ -1084,4 +1137,20 @@ async function fetchJsonWithRetry<T>(url: string, retries = 1): Promise<T> {
   }
 
   throw lastError ?? new Error("Request could not be completed.");
+}
+
+function getUnreadableApiResponseMessage(status: number) {
+  if (status === 404) {
+    return "Live market analysis is temporarily unavailable. Please try again shortly.";
+  }
+
+  if ([502, 503, 504].includes(status)) {
+    return "Live market analysis is taking longer than expected. Please try again shortly.";
+  }
+
+  if (status >= 500) {
+    return "Live market data could not be refreshed. Please try again shortly.";
+  }
+
+  return "Live market data returned an unexpected response. Please try again.";
 }
