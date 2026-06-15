@@ -25,7 +25,7 @@ export function IpoWorkspace({
   const upcomingIpos = ipos.filter((ipo) => ipo.category === "Upcoming");
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-sm font-semibold uppercase text-blue-700">
@@ -40,16 +40,16 @@ export function IpoWorkspace({
             regulatory sections, plus recent full-article news where available.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
           <button
-            className="cursor-pointer rounded-lg bg-blue-700 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+            className="min-h-11 cursor-pointer rounded-lg bg-blue-700 px-3 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400 sm:px-5"
             disabled={isLoading}
             onClick={onRefresh}
             type="button"
           >
             {isLoading ? "Checking IPOs..." : "Refresh IPOs"}
           </button>
-          <label className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700">
+          <label className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-2 text-sm font-semibold text-slate-700 sm:justify-start sm:px-3">
             <input
               checked={autoRefresh}
               onChange={(event) => onAutoRefreshChange(event.target.checked)}
@@ -150,18 +150,22 @@ function IpoCard({ ipo }: { ipo: IndiaIpoCandidate }) {
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+    <article className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:p-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h4 className="text-xl font-semibold">{ipo.companyName}</h4>
+            <h4 className="min-w-0 text-lg font-semibold sm:text-xl">
+              {ipo.companyName}
+            </h4>
             <Badge>{ipo.symbol}</Badge>
             <Badge>{ipo.verdict}</Badge>
             <Badge>{ipo.series}</Badge>
           </div>
           <p className="mt-2 text-sm leading-6 text-slate-600">{ipo.reason}</p>
         </div>
-        <div className={`min-w-48 border p-3 text-center ${decisionClass}`}>
+        <div
+          className={`w-full min-w-0 border p-3 text-center md:w-auto md:min-w-48 ${decisionClass}`}
+        >
           <p className="text-xs font-semibold uppercase">Should I apply?</p>
           <p className="mt-1 text-xl font-semibold">{ipo.assessment.decision}</p>
           <p className="mt-1 text-xs">
@@ -336,7 +340,7 @@ function DecisionPanel({ ipo }: { ipo: IndiaIpoCandidate }) {
       <h5 className="mt-4 text-sm font-semibold text-slate-950">
         Application considerations
       </h5>
-      <div className="mt-2 overflow-x-auto">
+      <div className="mt-2 hidden overflow-x-auto md:block">
         <table className="w-full min-w-[720px] border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-slate-300 text-xs uppercase text-slate-500">
@@ -374,6 +378,44 @@ function DecisionPanel({ ipo }: { ipo: IndiaIpoCandidate }) {
           </tbody>
         </table>
       </div>
+      <details className="mt-2 border-y border-slate-200 md:hidden">
+        <summary className="cursor-pointer py-3 text-sm font-semibold text-blue-700">
+          Review {assessment.metrics.length} application checks
+        </summary>
+        <dl className="divide-y divide-slate-200 border-t border-slate-200">
+          {assessment.metrics.map((metric) => (
+            <div className="py-4" key={metric.label}>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <dt className="min-w-0 flex-1 font-semibold text-slate-950">
+                  {metric.label}
+                  {metric.required ? (
+                    <span className="ml-1 text-xs font-medium text-slate-500">
+                      Required
+                    </span>
+                  ) : null}
+                </dt>
+                <MetricStatus status={metric.status} />
+              </div>
+              <dd className="mt-3">
+                <p className="text-xs font-semibold uppercase text-slate-500">
+                  Observed
+                </p>
+                <p className="mt-1 break-words text-sm text-slate-700">
+                  {metric.value}
+                </p>
+              </dd>
+              <dd className="mt-3">
+                <p className="text-xs font-semibold uppercase text-slate-500">
+                  Decision impact
+                </p>
+                <p className="mt-1 break-words text-sm leading-6 text-slate-600">
+                  {metric.consideration}
+                </p>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </details>
 
       {assessment.blockingReasons.length > 0 ? (
         <div className="mt-3 border-l-2 border-amber-500 pl-3">
@@ -415,7 +457,9 @@ function MetricStatus({
   }[status];
 
   return (
-    <span className={`inline-flex px-2 py-1 text-xs font-semibold ${statusClass}`}>
+    <span
+      className={`inline-flex shrink-0 px-2 py-1 text-xs font-semibold ${statusClass}`}
+    >
       {status}
     </span>
   );
@@ -503,7 +547,7 @@ function PlainData({
 
 function Badge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
+    <span className="max-w-full rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
       {children}
     </span>
   );
