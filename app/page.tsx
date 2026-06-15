@@ -1073,10 +1073,30 @@ async function fetchJsonWithRetry<T>(url: string, retries = 1): Promise<T> {
         cache: "no-store",
         credentials: "same-origin",
       });
-      const data = (await response.json()) as T & {
+      const responseBody = await response.text();
+      let data: (T & {
         diagnostic?: string;
         message?: string;
-      };
+      }) | null = null;
+
+      try {
+        data = responseBody
+          ? (JSON.parse(responseBody) as T & {
+              diagnostic?: string;
+              message?: string;
+            })
+          : null;
+      } catch {
+        throw new Error(getUnreadableApiResponseMessage(response.status));
+      }
+
+      if (!data) {
+        throw new Error(
+          response.ok
+            ? "The server returned an empty response."
+            : getUnreadableApiResponseMessage(response.status),
+        );
+      }
 
       if (!response.ok) {
         const detail =
@@ -1101,4 +1121,20 @@ async function fetchJsonWithRetry<T>(url: string, retries = 1): Promise<T> {
   }
 
   throw lastError ?? new Error("Request could not be completed.");
+}
+
+function getUnreadableApiResponseMessage(status: number) {
+  if (status === 404) {
+    return "The API endpoint was not found. The cloud deployment may still be updating.";
+  }
+
+  if ([502, 503, 504].includes(status)) {
+    return `The server timed out or is temporarily unavailable (${status}). Please retry shortly.`;
+  }
+
+  if (status >= 500) {
+    return `The server returned an invalid response (${status}).`;
+  }
+
+  return `The API returned an unreadable response (${status}).`;
 }
