@@ -109,6 +109,87 @@ export async function fetchZerodhaPositions(accessToken?: string) {
   return fetchZerodhaEndpoint("/portfolio/positions", accessToken);
 }
 
+export async function fetchZerodhaGtts(accessToken?: string) {
+  return fetchZerodhaEndpoint("/gtt/triggers", accessToken);
+}
+
+export async function placeZerodhaGtt(
+  input: {
+    type: "single" | "two-leg";
+    condition: {
+      exchange: "NSE";
+      tradingsymbol: string;
+      trigger_values: number[];
+      last_price: number;
+    };
+    orders: Array<{
+      exchange: "NSE";
+      tradingsymbol: string;
+      transaction_type: "BUY" | "SELL";
+      quantity: number;
+      order_type: "LIMIT";
+      product: "CNC";
+      price: number;
+    }>;
+  },
+  accessTokenOverride?: string,
+) {
+  const { KITE_API_KEY: apiKey } = await getServerConfig();
+  const accessToken = getZerodhaAccessToken(accessTokenOverride);
+
+  if (!apiKey || !accessToken) {
+    return {
+      configured: false,
+      data: null,
+      message: "Connect Zerodha before placing a GTT.",
+      statusCode: 401,
+    };
+  }
+
+  const body = new URLSearchParams({
+    type: input.type,
+    condition: JSON.stringify(input.condition),
+    orders: JSON.stringify(input.orders),
+  });
+
+  try {
+    const response = await fetch(`${kiteBaseUrl}/gtt/triggers`, {
+      method: "POST",
+      headers: {
+        ...getKiteHeaders(apiKey, accessToken),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return kiteFailure(response, "Zerodha rejected the GTT request.");
+    }
+
+    const payload = (await response.json()) as {
+      data?: { trigger_id?: number };
+    };
+
+    return {
+      configured: true,
+      data: payload.data ?? null,
+      message: "Zerodha accepted the GTT request.",
+      reconnectRequired: false,
+      statusCode: response.status,
+    };
+  } catch {
+    return {
+      configured: true,
+      data: null,
+      message:
+        "Zerodha could not be reached. No confirmed GTT was created by this request.",
+      reconnectRequired: false,
+      statusCode: 503,
+    };
+  }
+}
+
 export async function fetchZerodhaQuotes(
   instruments: string[],
   accessTokenOverride?: string,

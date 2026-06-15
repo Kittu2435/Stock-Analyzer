@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { IpoWorkspace } from "./components/IpoWorkspace";
+import { TradeOrderModal } from "./components/TradeOrderModal";
 import { normalizeNseSymbol } from "./lib/nseSymbols";
 import type {
   AgentPick,
@@ -551,13 +552,20 @@ function AgentPickCard({
           <p className="mt-2 text-sm leading-6 text-slate-600">{pick.reason}</p>
         </div>
         {onAdd ? (
-          <button
-            className="cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-            onClick={() => onAdd(pick.symbol)}
-            type="button"
-          >
-            Add to scan
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+              onClick={() => onAdd(pick.symbol)}
+              type="button"
+            >
+              Add to scan
+            </button>
+            <TradeOrderModal
+              signal={pick.signal}
+              sourceStrategy={pick.strategy.type}
+              sourceVerdict={pick.verdict}
+            />
+          </div>
         ) : null}
       </div>
 
@@ -728,9 +736,18 @@ function SignalCard({ signal }: { signal: TradeSignal }) {
           </div>
           <p className="mt-3 text-sm leading-6 text-slate-600">{signal.reason}</p>
         </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <p className="text-xs font-medium uppercase text-slate-500">Confidence</p>
-          <p className="mt-1 text-3xl font-semibold">{signal.confidence}%</p>
+        <div className="flex flex-col items-stretch gap-2">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-medium uppercase text-slate-500">
+              Confidence
+            </p>
+            <p className="mt-1 text-3xl font-semibold">{signal.confidence}%</p>
+          </div>
+          <TradeOrderModal
+            signal={signal}
+            sourceStrategy={signal.tradeType}
+            sourceVerdict={signal.decision}
+          />
         </div>
       </div>
 
