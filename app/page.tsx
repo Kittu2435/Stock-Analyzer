@@ -239,7 +239,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950">
-      <section className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-5 py-6 sm:px-8 lg:px-10">
+      <section className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-3 py-4 sm:px-8 sm:py-6 lg:px-10">
         <header className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm font-semibold uppercase text-blue-700">
             Stock Analyzer
