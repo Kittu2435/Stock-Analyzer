@@ -468,8 +468,8 @@ export default function Home() {
                 <Badge>Newest first</Badge>
               </div>
               <p className="mt-1 text-sm text-slate-600">
-                News-only companies appear here when Finnhub has not yet
-                provided a verified tradable US ticker and quote.
+                Current reporting remains visible even when a verified quote is
+                unavailable. Trade levels are never estimated without one.
               </p>
               <div className="mt-3 grid gap-2">
                 {latestMarketNews.map((headline) => (
