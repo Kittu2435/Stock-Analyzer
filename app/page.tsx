@@ -169,10 +169,9 @@ export default function Home() {
       setAgentGeneratedAt(data.generatedAt);
       setLatestMarketNews(data.latestNews ?? []);
     } catch (requestError) {
+      console.error("Trend agent refresh failed:", requestError);
       setAgentError(
-        requestError instanceof Error
-          ? requestError.message
-          : "Trend agent could not load current sources.",
+        "We couldn't refresh the latest market analysis. Please retry in a moment; automatic refresh will keep trying in the background.",
       );
     } finally {
       setIsAgentLoading(false);
@@ -441,7 +440,21 @@ export default function Home() {
           ) : null}
 
           {agentError ? (
-            <StateCard title="Agent failed" body={agentError} tone="red" />
+            <StateCard
+              action={
+                <button
+                  className="min-h-10 rounded-lg bg-amber-950 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isAgentLoading}
+                  onClick={runTrendAgent}
+                  type="button"
+                >
+                  {isAgentLoading ? "Retrying..." : "Retry scan"}
+                </button>
+              }
+              body={agentError}
+              title="Market scan unavailable"
+              tone="amber"
+            />
           ) : null}
 
           {!agentError && agentMessage ? (
@@ -880,10 +893,12 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 function StateCard({
+  action,
   body,
   title,
   tone = "slate",
 }: {
+  action?: ReactNode;
   body: string;
   title: string;
   tone?: "amber" | "red" | "slate";
@@ -898,6 +913,7 @@ function StateCard({
     <section className={`rounded-lg border p-5 shadow-sm ${toneClass}`}>
       <h2 className="text-lg font-semibold">{title}</h2>
       <p className="mt-2 text-sm leading-6">{body}</p>
+      {action ? <div className="mt-4">{action}</div> : null}
     </section>
   );
 }
@@ -1125,16 +1141,16 @@ async function fetchJsonWithRetry<T>(url: string, retries = 1): Promise<T> {
 
 function getUnreadableApiResponseMessage(status: number) {
   if (status === 404) {
-    return "The API endpoint was not found. The cloud deployment may still be updating.";
+    return "Live market analysis is temporarily unavailable. Please try again shortly.";
   }
 
   if ([502, 503, 504].includes(status)) {
-    return `The server timed out or is temporarily unavailable (${status}). Please retry shortly.`;
+    return "Live market analysis is taking longer than expected. Please try again shortly.";
   }
 
   if (status >= 500) {
-    return `The server returned an invalid response (${status}).`;
+    return "Live market data could not be refreshed. Please try again shortly.";
   }
 
-  return `The API returned an unreadable response (${status}).`;
+  return "Live market data returned an unexpected response. Please try again.";
 }
